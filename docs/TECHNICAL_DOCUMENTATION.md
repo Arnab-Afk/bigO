@@ -5,7 +5,7 @@
 
 **Version:** 1.0.0  
 **Last Updated:** February 7, 2026  
-**Authors:** RUDRA Development Team
+**Authors:** Team Big(O)
 
 ---
 
