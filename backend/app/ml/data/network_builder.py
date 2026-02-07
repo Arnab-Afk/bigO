@@ -20,6 +20,13 @@ import networkx as nx
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.spatial.distance import cdist
 
+try:
+    import yfinance as yf
+    YFINANCE_AVAILABLE = True
+except ImportError:
+    YFINANCE_AVAILABLE = False
+    logger.warning("yfinance not installed. Market channel will use synthetic data. Install with: pip install yfinance")
+
 logger = logging.getLogger(__name__)
 
 
@@ -284,15 +291,155 @@ class CompositeNetworkBuilder:
             similarity = similarity[np.ix_(indices, indices)]
         
         logger.info(f"Liquidity channel built: {len(bank_names)} banks, mean similarity: {similarity.mean():.4f}")
-        
-        return bank_names, similarity
-    
-    def build_market_channel(
+        False,
+        period: str = "1y",
+        interval: str = "1d"
+    ) ->_fetch_yahoo_finance_data(
         self,
         bank_names: List[str],
-        market_data: Optional[pd.DataFrame] = None,
-        use_synthetic: bool = True
-    ) -> Tuple[List[str], np.ndarray]:
+        period: str = "1y",
+        interval: str = "1d"
+    ) -> Optional[pd.DataFrame]:
+        """
+        Fetch stock price data from Yahoo Finance and compute returns
+        
+        Args:
+            bank_names: List of bank names
+            period: Time period (e.g., "1y", "2y", "6mo")
+            interval: Data interval (e.g., "1d", "1wk")
+        
+        Returns:
+            DataFrame with daily returns for each bank (columns = banks, rows = dates)
+        """
+        # Map bank names to Yahoo Finance ticker symbols
+        ticker_mapping = self._get_ticker_mapping()
+        
+        returns_dict = {}
+        successful_banks = []
+        
+        for bank_name in bank_names:
+            # Try to find ticker
+            ticker = None
+            bank_upper = bank_name.upper()
+            
+            # Direct lookup
+            if bank_upper in ticker_mapping:
+                ticker = ticker_mapping[bank_upper]
+            else:
+                # Fuzzy match - look for partial matches
+                for key, value in ticker_mapping.items():
+                    if key in bank_upper or bank_upper in key:
+                        ticker = value
+                        break
+            
+            if ticker is None:
+                logger.debug(f"No ticker found for {bank_name}")
+                continue
+            
+            try:
+                # Fetch data from Yahoo Finance
+                logger.debug(f"Fetching {ticker} for {bank_name}")
+                stock = yf.Ticker(ticker)
+                hist = stock.history(period=period, interval=interval)
+                
+                if hist.empty:
+                    logger.debug(f"No data returned for {ticker}")
+                    continue
+                
+                # Compute daily returns
+                returns = hist['Close'].pct_change().dropna()
+                
+                if len(returns) < 10:  # Need minimum data points
+                    logger.debug(f"Insufficient data for {ticker}: {len(returns)} points")
+                    continue
+                
+                returns_dict[bank_name] = returns
+                successful_banks.append(bank_name)
+                logger.debug(f"✓ Successfully fetched {len(returns)} returns for {bank_name}")
+                
+            except Exception as e:
+                logger.debug(f"Error fetching {ticker} for {bank_name}: {e}")
+                continue
+        
+        if not returns_dict:
+            logger.warning("No market data could be fetched from Yahoo Finance")
+            return None
+        
+        logger.info(f"Successfully fetched market data for {len(successful_banks)}/{len(bank_names)} banks")
+        
+        # Combine into single DataFrame
+        returns_df = pd.DataFrame(returns_dict)
+        
+        # Fill missing values (forward fill then backward fill)
+        returns_df = returns_df.fillna(method='ffill').fillna(method='bfill')
+        
+        # Drop columns with all NaN
+        returns_df = returns_df.dropna(axis=1, how='all')
+        
+        return returns_df
+    
+    def _get_ticker_mapping(self) -> Dict[str, str]:
+        """
+        Map Indian bank names to Yahoo Finance ticker symbols
+        
+        Returns:
+            Dictionary mapping bank names to ticker symbols
+        """
+        # Major Indian banks ticker symbols (NSE/BSE)
+        ticker_mapping = {
+            # Public Sector Banks
+            'STATE BANK OF INDIA': 'SBIN.NS',
+            'SBI': 'SBIN.NS',
+            'BANK OF BARODA': 'BANKBARODA.NS',
+            'BANK OF INDIA': 'BANKINDIA.NS',
+            'BANK OF MAHARASHTRA': 'MAHABANK.NS',
+            'CANARA BANK': 'CANBK.NS',
+            'CENTRAL BANK OF INDIA': 'CENTRALBANK.NS',
+            'INDIAN BANK': 'INDIANB.NS',
+            'INDIAN OVERSEAS BANK': 'IOB.NS',
+            'PUNJAB AND SIND BANK': 'PSB.NS',
+            'PUNJAB NATIONAL BANK': 'PNB.NS',
+            'UCO BANK': 'UCOBANK.NS',
+            'UNION BANK OF INDIA': 'UNIONBANK.NS',
+            
+            # Private Sector Banks
+            'HDFC BANK': 'HDFCBANK.NS',
+            'HDFC BANK LTD': 'HDFCBANK.NS',
+            'HDFC BANK LTD.': 'HDFCBANK.NS',
+            'ICICI BANK': 'ICICIBANK.NS',
+            'ICICI BANK LIMITED': 'ICICIBANK.NS',
+            'AXIS BANK': 'AXISBANK.NS',
+            'AXIS BANK LIMITED': 'AXISBANK.NS',
+            'KOTAK MAHINDRA BANK': 'KOTAKBANK.NS',
+            'INDUSIND BANK': 'INDUSINDBK.NS',
+            'YES BANK': 'YESBANK.NS',
+            'BANDHAN BANK': 'BANDHANBNK.NS',
+            'BANDHAN BANK LIMITED': 'BANDHANBNK.NS',
+            'IDFC FIRST BANK': 'IDFCFIRSTB.NS',
+            'FEDERAL BANK': 'FEDERALBNK.NS',
+            'FEDERAL BANK LTD': 'FEDERALBNK.NS',
+            'CITY UNION BANK': 'CUB.NS',
+            'CITY UNION BANK LIMITED': 'CUB.NS',
+            'KARNATAKA BANK': 'KTKBANK.NS',
+            'SOUTH INDIAN BANK': 'SOUTHBANK.NS',
+            'DCB BANK': 'DCBBANK.NS',
+            'DCB BANK LIMITED': 'DCBBANK.NS',
+            'RBL BANK': 'RBLBANK.NS',
+            'LAKSHMI VILAS BANK': 'LAKSHMVILAS.NS',
+            'DHANLAXMI BANK': 'DHANBANK.NS',
+            'DHANLAXMI BANK LIMITED': 'DHANBANK.NS',
+            'CSB BANK': 'CSB.NS',
+            'CSB BANK LIMITED': 'CSB.NS',
+            
+            # Small Finance Banks
+            'AU SMALL FINANCE BANK': 'AUBANK.NS',
+            'EQUITAS SMALL FINANCE BANK': 'EQUITASBNK.NS',
+            'UJJIVAN SMALL FINANCE BANK': 'UJJIVANSFB.NS',
+        }
+        
+        return ticker_mapping
+    
+    def  Tuple[List[str], np.ndarray]:
         """
         Build market correlation network
         
@@ -302,19 +449,43 @@ class CompositeNetworkBuilder:
         Markets reflect real-time confidence and contagion risk
         
         Method:
-        1. Compute rolling return correlations
-        2. Use historical windows only (no leakage)
+        1. Fetch stock price data from Yahoo Finance
+        2. Compute daily returns
+        3. Calculate correlation matrix
+        4. Use historical windows only (no leakage)
         
         Args:
             bank_names: List of banks to compute correlations for
             market_data: Optional dataframe with return data
             use_synthetic: If True, generate synthetic correlations
+            period: Time period for historical data (e.g., "1y", "2y", "6mo")
+            interval: Data interval (e.g., "1d", "1wk")
         
         Returns:
             bank_names: List of bank identifiers
             correlation_matrix: Market correlation matrix (normalized to [0,1])
         """
         logger.info(f"Building market channel for {len(bank_names)} banks")
+        
+        if market_data is not None and not market_data.empty:
+            # Use provided market data
+            logger.info("Using provided market data")
+            # Compute correlations from return data
+            correlations = market_data.corr().values
+        elif not use_synthetic and YFINANCE_AVAILABLE:
+            # Fetch real market data from Yahoo Finance
+            logger.info("Fetching real market data from Yahoo Finance...")
+            returns_df = self._fetch_yahoo_finance_data(bank_names, period, interval)
+            
+            if returns_df is not None and not returns_df.empty:
+                # Compute correlation matrix
+                correlations = returns_df.corr().values
+                logger.info(f"Successfully computed correlations from Yahoo Finance data")
+            else:
+                logger.warning("Failed to fetch Yahoo Finance data, falling back to synthetic")
+                use_synthetic = True
+        
+        if use_synthetic or not YFINANCE_AVAILABLEding market channel for {len(bank_names)} banks")
         
         if market_data is not None and not market_data.empty:
             # Use provided market data

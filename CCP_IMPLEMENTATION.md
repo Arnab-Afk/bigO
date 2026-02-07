@@ -178,6 +178,14 @@ network = builder.build_composite_network(
 w_ij = (α·w^(sector) + β·w^(liquidity) + γ·w^(market)) × √(C_i × C_j)
 ```
 
+**Market Data Integration**:
+The system automatically fetches real stock price data from Yahoo Finance for Indian banks (NSE/BSE). It computes correlations from daily returns over the past year. If Yahoo Finance data is unavailable, it falls back to synthetic correlations.
+
+Supported banks include:
+- Public Sector: SBI (SBIN.NS), PNB, Bank of Baroda, Canara Bank, etc.
+- Private Sector: HDFC Bank, ICICI Bank, Axis Bank, Kotak Mahindra, etc.
+- Small Finance: AU Small Finance Bank, Equitas, Ujjivan, etc.
+
 ### 2. Spectral Fragility Analysis
 
 ```python
@@ -297,17 +305,33 @@ Key packages (already in `requirements.txt`):
 - `numpy`, `pandas` - Data manipulation
 - `scikit-learn` - ML utilities
 - `scipy` - Spectral analysis
+- `yfinance` - Yahoo Finance API for real market data
 
-## Next Steps
+**Install all dependencies:**
+```bash
+pip install -r requirements.txt
+```
+Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-1. **Train the Model**:
+2. **Train the Model**:
    ```bash
    python scripts/ccp_pipeline.py --train
    ```
 
-2. **Run Full Analysis**:
+3. **Run Full Analysis** (with real Yahoo Finance data):
    ```bash
    python scripts/ccp_pipeline.py --full-pipeline --save-report
+   ```
+
+4. **Review Report**:
+   ```bash
+   cat ccp_risk_report.txt
+   ```
+
+5  python scripts/ccp_pipeline.py --full-pipeline --save-report
    ```
 
 3. **Review Report**:
