@@ -1,7 +1,3 @@
-Below is a **comprehensive, technical README / project documentation** for **Project RUDRA**, written in a **datathon + regulator-grade style**. This can be directly used as a `README.md`, shared with judges, or attached as technical documentation.
-
----
-
 # **Project RUDRA**
 
 ## **Resilient Unified Decision & Risk Analytics**
