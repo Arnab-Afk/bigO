@@ -122,8 +122,54 @@ class TimestepData(BaseSchema):
 
 class SimulationTimeline(BaseSchema):
     """Timeline of simulation states"""
-    
+
     simulation_id: UUID
     timesteps: List[TimestepData]
     start_timestep: int
     end_timestep: int
+
+
+# --- Payoff Schemas ---
+
+
+class PayoffAgentSummary(BaseSchema):
+    """Per-agent payoff summary"""
+    final_utility: float
+    cumulative_utility: float
+    avg_utility: float
+    total_revenue: float = 0.0
+    total_credit_risk_cost: float = 0.0
+    total_liquidity_risk_cost: float = 0.0
+    total_regulatory_cost: float = 0.0
+
+
+class PayoffSummaryResponse(BaseSchema):
+    """Full payoff analysis response"""
+    simulation_id: UUID
+    payoff_summary: Dict[str, PayoffAgentSummary]
+    payoff_matrices: List[Dict[str, Any]]
+
+
+class PayoffTimelineEntry(BaseSchema):
+    """Single timestep payoff for an agent"""
+    timestep: int
+    total: float
+    revenue: float
+    credit_risk: float
+    liquidity_risk: float
+    regulatory: float
+    action: str
+
+
+class PayoffTimelineResponse(BaseSchema):
+    """Per-agent payoff evolution"""
+    simulation_id: UUID
+    agent_id: Optional[UUID] = None
+    timeline: Dict[str, Any]
+
+
+class PayoffMatrixResponse(BaseSchema):
+    """Pairwise payoff matrices with Nash equilibria"""
+    simulation_id: UUID
+    matrices: List[Dict[str, Any]]
+    count: int

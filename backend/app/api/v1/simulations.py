@@ -3,7 +3,7 @@ Simulation API endpoints
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
@@ -298,5 +298,166 @@ async def delete_simulation(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete a running simulation"
         )
-    
+
     await db.delete(simulation)
+
+
+# --- Payoff Analysis Endpoints ---
+
+
+async def _get_completed_simulation(
+    simulation_id: UUID, db: AsyncSession
+) -> Simulation:
+    """Helper: verify simulation exists and is completed."""
+    query = select(Simulation).where(Simulation.id == simulation_id)
+    result = await db.execute(query)
+    simulation = result.scalar_one_or_none()
+
+    if not simulation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Simulation {simulation_id} not found",
+        )
+    if simulation.status != SimulationStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Simulation not completed (status: {simulation.status.value})",
+        )
+    return simulation
+
+
+@router.get("/{simulation_id}/payoffs")
+async def get_simulation_payoffs(
+    simulation_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Get per-agent payoff analysis for a completed simulation.
+
+    Returns payoff summary (final, cumulative, average utility per agent)
+    and pairwise payoff matrices with identified Nash equilibria.
+    """
+    await _get_completed_simulation(simulation_id, db)
+
+    query = select(SimulationResult).where(
+        SimulationResult.simulation_id == simulation_id,
+        SimulationResult.result_type == "payoff_analysis",
+    )
+    result = await db.execute(query)
+    payoff_result = result.scalar_one_or_none()
+
+    if not payoff_result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payoff data not found for this simulation",
+        )
+
+    return {
+        "simulation_id": str(simulation_id),
+        "payoff_summary": payoff_result.metrics_data.get("payoff_summary", {}),
+        "payoff_matrices": payoff_result.metrics_data.get("payoff_matrices", []),
+    }
+
+
+@router.get("/{simulation_id}/payoffs/timeline")
+async def get_payoff_timeline(
+    simulation_id: UUID,
+    agent_id: Optional[UUID] = Query(None, description="Filter by specific agent"),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Get per-agent payoff evolution over simulation timesteps.
+
+    Each entry contains: total utility, revenue, credit risk cost,
+    liquidity risk cost, regulatory cost, and action taken.
+    Optionally filter by agent_id.
+    """
+    await _get_completed_simulation(simulation_id, db)
+
+    query = select(SimulationResult).where(
+        SimulationResult.simulation_id == simulation_id,
+        SimulationResult.result_type == "payoff_analysis",
+    )
+    result = await db.execute(query)
+    payoff_result = result.scalar_one_or_none()
+
+    if not payoff_result or not payoff_result.timeline_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payoff timeline not found for this simulation",
+        )
+
+    timeline = payoff_result.timeline_data.get("payoff_timeline", {})
+
+    if agent_id:
+        agent_key = str(agent_id)
+        if agent_key not in timeline:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No payoff data for agent {agent_id}",
+            )
+        return {
+            "simulation_id": str(simulation_id),
+            "agent_id": str(agent_id),
+            "timeline": timeline[agent_key],
+        }
+
+    return {
+        "simulation_id": str(simulation_id),
+        "timeline": timeline,
+    }
+
+
+@router.get("/{simulation_id}/payoffs/matrix")
+async def get_payoff_matrix(
+    simulation_id: UUID,
+    timestep: Optional[int] = Query(None, description="Filter by timestep"),
+    agent_i: Optional[UUID] = Query(None, description="Filter by first agent"),
+    agent_j: Optional[UUID] = Query(None, description="Filter by second agent"),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Get pairwise payoff matrices showing strategy-pair payoffs and Nash equilibria.
+
+    Each matrix entry shows: for a given (action_i, action_j) pair,
+    what utility does agent_i and agent_j receive?
+    Nash equilibria are strategy pairs where neither agent can improve unilaterally.
+    """
+    await _get_completed_simulation(simulation_id, db)
+
+    query = select(SimulationResult).where(
+        SimulationResult.simulation_id == simulation_id,
+        SimulationResult.result_type == "payoff_analysis",
+    )
+    result = await db.execute(query)
+    payoff_result = result.scalar_one_or_none()
+
+    if not payoff_result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payoff data not found for this simulation",
+        )
+
+    matrices = payoff_result.metrics_data.get("payoff_matrices", [])
+
+    # Apply filters
+    if timestep is not None:
+        matrices = [m for m in matrices if m.get("timestep") == timestep]
+    if agent_i:
+        ai_str = str(agent_i)
+        matrices = [
+            m for m in matrices
+            if m.get("agent_i") == ai_str or m.get("agent_j") == ai_str
+        ]
+    if agent_j:
+        aj_str = str(agent_j)
+        matrices = [
+            m for m in matrices
+            if m.get("agent_i") == aj_str or m.get("agent_j") == aj_str
+        ]
+
+    return {
+        "simulation_id": str(simulation_id),
+        "matrices": matrices,
+        "count": len(matrices),
+    }

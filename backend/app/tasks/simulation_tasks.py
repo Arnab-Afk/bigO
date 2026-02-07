@@ -16,7 +16,7 @@ from sqlalchemy import select
 from app.tasks import celery_app
 from app.core.logging import logger
 from app.db.session import async_session_factory
-from app.models.simulation import Simulation, SimulationStatus
+from app.models.simulation import Simulation, SimulationResult, SimulationStatus
 from app.models.institution import Institution
 from app.models.exposure import Exposure
 from app.models.scenario import Scenario
@@ -156,7 +156,37 @@ async def _execute_simulation(simulation_id: str, task: Task) -> Dict:
                 shock_timing=shock_timing,
             )
             
-            # Store results
+            # Serialize per-agent payoff history
+            payoff_timeline = {}
+            payoff_summary = {}
+            for agent_id, payoffs in sim_state.payoff_history.items():
+                agent_key = str(agent_id)
+                payoff_timeline[agent_key] = [
+                    {
+                        "timestep": p.timestep,
+                        "total": p.total_utility,
+                        "revenue": p.revenue,
+                        "credit_risk": p.credit_risk_cost,
+                        "liquidity_risk": p.liquidity_risk_cost,
+                        "regulatory": p.regulatory_cost,
+                        "action": p.action_taken,
+                    }
+                    for p in payoffs
+                ]
+                payoff_summary[agent_key] = {
+                    "final_utility": payoffs[-1].total_utility if payoffs else 0,
+                    "cumulative_utility": sum(p.total_utility for p in payoffs),
+                    "avg_utility": (
+                        sum(p.total_utility for p in payoffs) / len(payoffs)
+                        if payoffs else 0
+                    ),
+                    "total_revenue": sum(p.revenue for p in payoffs),
+                    "total_credit_risk_cost": sum(p.credit_risk_cost for p in payoffs),
+                    "total_liquidity_risk_cost": sum(p.liquidity_risk_cost for p in payoffs),
+                    "total_regulatory_cost": sum(p.regulatory_cost for p in payoffs),
+                }
+
+            # Store main results
             results = {
                 'total_timesteps': len(sim_state.timesteps),
                 'converged': sim_state.converged,
@@ -165,13 +195,34 @@ async def _execute_simulation(simulation_id: str, task: Task) -> Dict:
                 'total_losses': float(sim_state.total_losses),
                 'final_metrics': sim_state.timesteps[-1].network_metrics if sim_state.timesteps else {},
                 'cascade_rounds': len(sim_state.cascade_history),
+                'payoff_summary': payoff_summary,
             }
-            
+
             simulation.results = results
             simulation.status = SimulationStatus.COMPLETED
             simulation.completed_at = datetime.utcnow()
             simulation.current_timestep = len(sim_state.timesteps)
-            
+
+            # Store payoff analysis as a separate SimulationResult record
+            num_agents = len(sim_state.timesteps[0].agent_states) if sim_state.timesteps else 1
+            payoff_result = SimulationResult(
+                simulation_id=UUID(simulation_id),
+                result_type="payoff_analysis",
+                total_defaults=len(sim_state.final_defaults),
+                max_cascade_depth=len(sim_state.cascade_history),
+                survival_rate=1.0 - (len(sim_state.final_defaults) / max(1, num_agents)),
+                final_systemic_stress=0.0,
+                total_system_loss=float(sim_state.total_losses),
+                metrics_data={
+                    "payoff_summary": payoff_summary,
+                    "payoff_matrices": sim_state.payoff_matrices[:20],
+                },
+                timeline_data={
+                    "payoff_timeline": payoff_timeline,
+                },
+            )
+            session.add(payoff_result)
+
             await session.commit()
             
             logger.info(

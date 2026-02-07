@@ -15,10 +15,12 @@ import networkx as nx
 import numpy as np
 
 from app.engine.game_theory import (
+    ActionType,
     AgentAction,
     AgentState,
     AgentUtility,
     NashEquilibriumSolver,
+    PayoffComponents,
     generate_action_space,
 )
 from app.engine.contagion import (
@@ -50,6 +52,7 @@ class TimestepState:
     defaults: List[DefaultEvent]
     propagation_state: PropagationState
     network_metrics: Dict
+    agent_payoffs: Dict[UUID, Dict] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -63,6 +66,8 @@ class SimulationState:
     total_losses: float
     converged: bool
     convergence_step: Optional[int] = None
+    payoff_history: Dict[UUID, List[PayoffComponents]] = field(default_factory=dict)
+    payoff_matrices: List[Dict] = field(default_factory=list)
 
 
 class SimulationEngine:
@@ -99,6 +104,10 @@ class SimulationEngine:
         self.belief_updater = BayesianBeliefUpdater()
         self.signal_processor = SignalProcessor()
         self.network_analyzer = NetworkAnalyzer(network)
+
+        # Payoff tracking
+        self.payoff_history: Dict[UUID, List[PayoffComponents]] = {}
+        self.payoff_matrices: List[Dict] = []
     
     def run_simulation(
         self,
@@ -194,6 +203,21 @@ class SimulationEngine:
             # 6. Update beliefs based on observations
             self._update_beliefs(current_states, new_defaults)
             
+            # Build per-agent payoff snapshot for this timestep
+            timestep_payoffs = {}
+            for agent_id in current_states.keys():
+                if agent_id in self.payoff_history and self.payoff_history[agent_id]:
+                    latest = self.payoff_history[agent_id][-1]
+                    if latest.timestep == t:
+                        timestep_payoffs[agent_id] = {
+                            "total": latest.total_utility,
+                            "revenue": latest.revenue,
+                            "credit_risk": latest.credit_risk_cost,
+                            "liquidity_risk": latest.liquidity_risk_cost,
+                            "regulatory": latest.regulatory_cost,
+                            "action": latest.action_taken,
+                        }
+
             # Record timestep
             timestep_state = TimestepState(
                 timestep=t,
@@ -202,6 +226,7 @@ class SimulationEngine:
                 defaults=new_defaults,
                 propagation_state=prop_state,
                 network_metrics=self._compute_network_metrics(),
+                agent_payoffs=timestep_payoffs,
             )
             history.append(timestep_state)
             
@@ -215,8 +240,10 @@ class SimulationEngine:
                     total_losses=self._calculate_total_losses(all_cascades),
                     converged=True,
                     convergence_step=t,
+                    payoff_history=self.payoff_history,
+                    payoff_matrices=self.payoff_matrices,
                 )
-        
+
         # Completed without convergence
         return SimulationState(
             simulation_id=simulation_id,
@@ -225,6 +252,8 @@ class SimulationEngine:
             final_defaults=all_defaults,
             total_losses=self._calculate_total_losses(all_cascades),
             converged=False,
+            payoff_history=self.payoff_history,
+            payoff_matrices=self.payoff_matrices,
         )
     
     def _agent_decision_phase(
@@ -233,13 +262,14 @@ class SimulationEngine:
         timestep: int
     ) -> Dict[UUID, AgentAction]:
         """
-        Each agent computes optimal action given beliefs and network state
+        Each agent computes optimal action given beliefs and network state.
+        Also records per-agent payoff components and computes pairwise payoff matrices.
         """
         decisions = {}
-        
+
         # Get exposure graph
         exposures = self._get_exposure_dict()
-        
+
         # Generate action spaces
         action_spaces = {}
         for agent_id, state in states.items():
@@ -247,24 +277,70 @@ class SimulationEngine:
             action_spaces[agent_id] = generate_action_space(
                 agent_id, state, counterparties
             )
-        
-        # Compute Nash equilibrium (or best responses)
+
+        # Extract Bayesian beliefs for Nash computation
+        beliefs_dict = None
+        if hasattr(self.belief_updater, 'beliefs') and self.belief_updater.beliefs:
+            beliefs_dict = {}
+            for inst_id, belief_dist in self.belief_updater.beliefs.items():
+                if hasattr(belief_dist, 'beliefs'):
+                    beliefs_dict[inst_id] = belief_dist.beliefs
+                elif isinstance(belief_dist, dict):
+                    beliefs_dict[inst_id] = belief_dist
+
+        # Compute Nash equilibrium with beliefs (incomplete information)
         equilibrium = self.nash_solver.solve_pure_nash(
             agents=states,
             exposures=exposures,
             action_spaces=action_spaces,
+            beliefs=beliefs_dict,
         )
-        
+
         if equilibrium:
             decisions = equilibrium
         else:
             # Fallback: each agent plays maintain status
             for agent_id in states.keys():
                 decisions[agent_id] = AgentAction(
-                    action_type="maintain_status",
+                    action_type=ActionType.MAINTAIN_STATUS,
                     agent_id=agent_id,
                 )
-        
+
+        # Record per-agent payoff components
+        for agent_id, action in decisions.items():
+            state = states[agent_id]
+            utility_calc = AgentUtility(risk_aversion=state.risk_appetite)
+            components = utility_calc.compute_utility_components(
+                action=action,
+                agent_state=state,
+                network_state=states,
+                exposures=exposures,
+                timestep=timestep,
+            )
+            if agent_id not in self.payoff_history:
+                self.payoff_history[agent_id] = []
+            self.payoff_history[agent_id].append(components)
+
+        # Compute pairwise payoff matrices at first timestep and every 10 timesteps
+        if timestep == 1 or timestep % 10 == 0:
+            agent_ids = list(states.keys())
+            for i, ai in enumerate(agent_ids):
+                for aj in agent_ids[i + 1:]:
+                    # Only for directly connected pairs
+                    if (ai, aj) in exposures or (aj, ai) in exposures:
+                        matrix = self.nash_solver.compute_pairwise_payoff_matrix(
+                            agent_i_id=ai,
+                            agent_j_id=aj,
+                            agents=states,
+                            exposures=exposures,
+                            action_space_i=action_spaces.get(ai, []),
+                            action_space_j=action_spaces.get(aj, []),
+                        )
+                        self.payoff_matrices.append({
+                            "timestep": timestep,
+                            **matrix.to_dict()
+                        })
+
         return decisions
     
     def _execute_actions(
@@ -273,29 +349,57 @@ class SimulationEngine:
         actions: Dict[UUID, AgentAction]
     ) -> Dict[UUID, AgentState]:
         """
-        Apply agent actions to update states
+        Apply agent actions to update states.
+        Handles all 6 action types including margin, reroute, and collateral.
         """
         new_states = {k: v for k, v in states.items()}
-        
+
         for agent_id, action in actions.items():
             state = new_states[agent_id]
-            
-            if action.action_type == "adjust_credit_limit":
+            action_type = (
+                action.action_type.value
+                if isinstance(action.action_type, ActionType)
+                else str(action.action_type)
+            )
+
+            if action_type == "adjust_credit_limit":
                 # Adjust exposure
                 if action.magnitude > 0:
                     state.credit_exposure += action.magnitude
                 else:
                     state.credit_exposure = max(0, state.credit_exposure + action.magnitude)
-            
-            elif action.action_type == "liquidity_decision":
+
+            elif action_type == "liquidity_decision":
                 decision = action.parameters.get("decision")
                 if decision == "HOARD":
-                    # Increase liquidity buffer
                     state.liquidity_buffer = min(1.0, state.liquidity_buffer + 0.1)
                 elif decision == "RELEASE":
-                    # Decrease liquidity buffer but gain revenue
                     state.liquidity_buffer = max(0.0, state.liquidity_buffer - 0.05)
-        
+
+            elif action_type == "modify_margin":
+                # Tightening margins reduces own risk but stresses counterparty
+                if action.target_id and action.target_id in new_states:
+                    target_state = new_states[action.target_id]
+                    if action.magnitude > 0:  # Tighten
+                        target_state.stress_level = min(1.0, target_state.stress_level + 0.02)
+                        state.credit_exposure = max(0, state.credit_exposure - action.magnitude * 0.1)
+                    else:  # Loosen
+                        target_state.stress_level = max(0, target_state.stress_level - 0.01)
+
+            elif action_type == "reroute_trade":
+                # Reduce exposure to target, small friction cost
+                if action.target_id and action.target_id in new_states:
+                    state.credit_exposure = max(0, state.credit_exposure - action.magnitude)
+                    state.stress_level = min(1.0, state.stress_level + 0.01)
+
+            elif action_type == "collateral_call":
+                # Increase own liquidity, decrease target's
+                state.liquidity_buffer = min(1.0, state.liquidity_buffer + 0.05)
+                if action.target_id and action.target_id in new_states:
+                    target_state = new_states[action.target_id]
+                    target_state.liquidity_buffer = max(0.0, target_state.liquidity_buffer - 0.05)
+                    target_state.stress_level = min(1.0, target_state.stress_level + 0.03)
+
         return new_states
     
     def _apply_shock(

@@ -57,10 +57,76 @@ class AgentState:
         return self.stress_level > 0.5 or self.liquidity_buffer < 0.3
 
 
+@dataclass
+class PayoffComponents:
+    """Decomposed payoff for a single agent at a single timestep"""
+    agent_id: UUID
+    timestep: int
+    total_utility: float
+    revenue: float
+    credit_risk_cost: float
+    liquidity_risk_cost: float
+    regulatory_cost: float
+    action_taken: str
+    target_id: Optional[UUID] = None
+
+    def to_dict(self) -> Dict:
+        return {
+            "agent_id": str(self.agent_id),
+            "timestep": self.timestep,
+            "total_utility": self.total_utility,
+            "revenue": self.revenue,
+            "credit_risk_cost": self.credit_risk_cost,
+            "liquidity_risk_cost": self.liquidity_risk_cost,
+            "regulatory_cost": self.regulatory_cost,
+            "action_taken": self.action_taken,
+            "target_id": str(self.target_id) if self.target_id else None,
+        }
+
+
+@dataclass
+class PayoffMatrixEntry:
+    """A single cell in the pairwise payoff matrix"""
+    agent_i_id: UUID
+    agent_j_id: UUID
+    agent_i_action: str
+    agent_j_action: str
+    agent_i_payoff: float
+    agent_j_payoff: float
+
+
+@dataclass
+class PayoffMatrix:
+    """Complete pairwise payoff matrix for a pair of agents"""
+    agent_i_id: UUID
+    agent_j_id: UUID
+    entries: List[PayoffMatrixEntry]
+    nash_equilibria: List[Tuple[str, str]]
+
+    def to_dict(self) -> Dict:
+        """Serialize to dict for JSONB storage"""
+        matrix = {}
+        for entry in self.entries:
+            key = f"{entry.agent_i_action}|{entry.agent_j_action}"
+            matrix[key] = {
+                "agent_i_payoff": entry.agent_i_payoff,
+                "agent_j_payoff": entry.agent_j_payoff,
+            }
+        return {
+            "agent_i": str(self.agent_i_id),
+            "agent_j": str(self.agent_j_id),
+            "matrix": matrix,
+            "nash_equilibria": [
+                {"action_i": ne[0], "action_j": ne[1]}
+                for ne in self.nash_equilibria
+            ],
+        }
+
+
 class AgentUtility:
     """
     Utility function calculator for strategic agents
-    
+
     Based on: U_i(a_i, a_{-i}, θ_i) = π_i - ρ·Risk - λ·Liquidity_Cost - γ·Regulatory_Cost
     """
     
@@ -114,25 +180,85 @@ class AgentUtility:
         )
         
         return utility
-    
+
+    def compute_utility_components(
+        self,
+        action: AgentAction,
+        agent_state: AgentState,
+        network_state: Dict[UUID, AgentState],
+        exposures: Dict[Tuple[UUID, UUID], float],
+        timestep: int = 0,
+    ) -> "PayoffComponents":
+        """
+        Compute utility with full component decomposition.
+
+        Returns PayoffComponents with the breakdown instead of a scalar.
+        """
+        revenue = self._compute_revenue(action, agent_state)
+        credit_risk = self._compute_credit_risk(
+            action, agent_state, network_state, exposures
+        )
+        liquidity_risk = self._compute_liquidity_risk(action, agent_state)
+        regulatory_cost = self._compute_regulatory_cost(action, agent_state)
+
+        total = (
+            revenue
+            - self.risk_aversion * credit_risk
+            - self.liquidity_weight * liquidity_risk
+            - self.regulatory_weight * regulatory_cost
+        )
+
+        action_name = (
+            action.action_type.value
+            if isinstance(action.action_type, ActionType)
+            else str(action.action_type)
+        )
+
+        return PayoffComponents(
+            agent_id=agent_state.agent_id,
+            timestep=timestep,
+            total_utility=total,
+            revenue=revenue,
+            credit_risk_cost=self.risk_aversion * credit_risk,
+            liquidity_risk_cost=self.liquidity_weight * liquidity_risk,
+            regulatory_cost=self.regulatory_weight * regulatory_cost,
+            action_taken=action_name,
+            target_id=action.target_id,
+        )
+
     def _compute_revenue(self, action: AgentAction, state: AgentState) -> float:
         """Expected revenue from action"""
         if action.action_type == ActionType.ADJUST_CREDIT_LIMIT:
             # Revenue from lending
             net_interest_margin = 0.02  # 2% NIM
             return action.magnitude * net_interest_margin
-        
+
         elif action.action_type == ActionType.LIQUIDITY_DECISION:
             # Opportunity cost of hoarding
             if action.parameters.get("decision") == "HOARD":
                 return -action.magnitude * 0.01  # Cost of idle cash
             else:
                 return action.magnitude * 0.015  # Return from deployment
-        
+
+        elif action.action_type == ActionType.MODIFY_MARGIN:
+            # Tightening margins: reduces risk but costs opportunity
+            if action.magnitude > 0:  # Tighten
+                return -action.magnitude * 0.005
+            else:  # Loosen
+                return abs(action.magnitude) * 0.008
+
+        elif action.action_type == ActionType.REROUTE_TRADE:
+            # Transaction cost of rerouting
+            return -abs(action.magnitude) * 0.003
+
+        elif action.action_type == ActionType.COLLATERAL_CALL:
+            # Small revenue from collateral interest
+            return action.magnitude * 0.002
+
         elif action.action_type == ActionType.MAINTAIN_STATUS:
             # Current steady-state revenue
             return state.credit_exposure * 0.015
-        
+
         return 0.0
     
     def _compute_credit_risk(
@@ -146,23 +272,55 @@ class AgentUtility:
         Expected credit loss: E[Loss] = Σ PD × LGD × EAD
         """
         expected_loss = 0.0
-        
+
+        # LGD varies by exposure type
+        lgd_map = {
+            "interbank_lending": 0.45,
+            "derivatives": 0.60,
+            "repo": 0.20,
+            "securities_lending": 0.30,
+            "collateral": 0.15,
+            "credit_line": 0.55,
+            "clearing_margin": 0.25,
+            "settlement": 0.35,
+            "trade_finance": 0.50,
+        }
+
         # Calculate exposure-weighted default probability
-        for (source, target), exposure_amount in exposures.items():
+        for (source, target), exposure_data in exposures.items():
             if source == state.agent_id:
                 target_state = network_state.get(target)
                 if target_state:
                     pd = target_state.default_probability
-                    lgd = 0.45  # Loss given default (45%)
-                    ead = exposure_amount
-                    
+
+                    # Extract exposure amount and type-aware LGD
+                    if isinstance(exposure_data, dict):
+                        ead = exposure_data.get("magnitude", 0.0)
+                        lgd = lgd_map.get(exposure_data.get("type", ""), 0.45)
+                    else:
+                        ead = float(exposure_data)
+                        lgd = 0.45  # Default LGD
+
                     # Adjust EAD based on action
-                    if (action.action_type == ActionType.ADJUST_CREDIT_LIMIT 
+                    if (action.action_type == ActionType.ADJUST_CREDIT_LIMIT
                         and action.target_id == target):
                         ead += action.magnitude
-                    
+
+                    if (action.action_type == ActionType.COLLATERAL_CALL
+                        and action.target_id == target):
+                        ead = max(0, ead - action.magnitude * 0.5)
+
+                    if (action.action_type == ActionType.MODIFY_MARGIN
+                        and action.target_id == target
+                        and action.magnitude > 0):
+                        ead *= 0.9  # 10% reduction from tighter margins
+
+                    if (action.action_type == ActionType.REROUTE_TRADE
+                        and action.target_id == target):
+                        ead = max(0, ead - abs(action.magnitude))
+
                     expected_loss += pd * lgd * ead
-        
+
         return expected_loss
     
     def _compute_liquidity_risk(self, action: AgentAction, state: AgentState) -> float:
@@ -220,15 +378,17 @@ class NashEquilibriumSolver:
         agents: Dict[UUID, AgentState],
         exposures: Dict[Tuple[UUID, UUID], float],
         action_spaces: Dict[UUID, List[AgentAction]],
+        beliefs: Optional[Dict[UUID, Dict[str, float]]] = None,
     ) -> Optional[Dict[UUID, AgentAction]]:
         """
         Find pure strategy Nash equilibrium via best response iteration
-        
+
         Args:
             agents: Current states of all agents
             exposures: Exposure network
             action_spaces: Available actions for each agent
-        
+            beliefs: Bayesian belief distributions over counterparty states
+
         Returns:
             Nash equilibrium strategy profile or None if not found
         """
@@ -240,11 +400,11 @@ class NashEquilibriumSolver:
             )
             for agent_id in agents.keys()
         }
-        
+
         for iteration in range(self.max_iterations):
             new_strategies = {}
             changed = False
-            
+
             for agent_id in agents.keys():
                 best_response = self._compute_best_response(
                     agent_id=agent_id,
@@ -252,22 +412,23 @@ class NashEquilibriumSolver:
                     agents=agents,
                     exposures=exposures,
                     action_space=action_spaces.get(agent_id, []),
+                    beliefs=beliefs,
                 )
-                
+
                 if best_response.action_type != strategies[agent_id].action_type:
                     changed = True
-                
+
                 new_strategies[agent_id] = best_response
-            
+
             strategies = new_strategies
-            
+
             # Check convergence
             if not changed:
                 return strategies
-        
+
         # No pure Nash found in max iterations
         return None
-    
+
     def _compute_best_response(
         self,
         agent_id: UUID,
@@ -275,16 +436,17 @@ class NashEquilibriumSolver:
         agents: Dict[UUID, AgentState],
         exposures: Dict[Tuple[UUID, UUID], float],
         action_space: List[AgentAction],
+        beliefs: Optional[Dict[UUID, Dict[str, float]]] = None,
     ) -> AgentAction:
         """
-        Find utility-maximizing action given others' strategies
+        Find utility-maximizing action given others' strategies and beliefs
         """
         agent_state = agents[agent_id]
         utility_calculator = AgentUtility(risk_aversion=agent_state.risk_appetite)
-        
+
         best_action = None
         best_utility = float('-inf')
-        
+
         # Add maintain status as default option
         if not any(a.action_type == ActionType.MAINTAIN_STATUS for a in action_space):
             action_space = action_space + [
@@ -293,21 +455,31 @@ class NashEquilibriumSolver:
                     agent_id=agent_id,
                 )
             ]
-        
+
         for action in action_space:
-            utility = utility_calculator.compute_utility(
-                action=action,
-                agent_state=agent_state,
-                network_state=agents,
-                exposures=exposures,
-            )
-            
+            if beliefs is not None:
+                # Use belief-weighted expected utility (incomplete information)
+                utility = self.compute_expected_utility(
+                    agent_id=agent_id,
+                    action=action,
+                    beliefs=beliefs,
+                    agents=agents,
+                    exposures=exposures,
+                )
+            else:
+                utility = utility_calculator.compute_utility(
+                    action=action,
+                    agent_state=agent_state,
+                    network_state=agents,
+                    exposures=exposures,
+                )
+
             if utility > best_utility:
                 best_utility = utility
                 best_action = action
-        
+
         return best_action if best_action else action_space[0]
-    
+
     def compute_expected_utility(
         self,
         agent_id: UUID,
@@ -317,24 +489,14 @@ class NashEquilibriumSolver:
         exposures: Dict[Tuple[UUID, UUID], float],
     ) -> float:
         """
-        Compute expected utility under Bayesian beliefs about opponent types
-        
-        Args:
-            agent_id: ID of the agent
-            action: Action being considered
-            beliefs: Probability distributions over opponent types
-            agents: Current agent states
-            exposures: Exposure network
-        
-        Returns:
-            Expected utility value
+        Compute expected utility under Bayesian beliefs about opponent types.
+
+        Integrates base utility with uncertainty penalty from belief variance,
+        capturing the risk premium agents demand under incomplete information.
         """
-        # For simplicity, use current states weighted by beliefs
-        # In full implementation, would integrate over type distributions
-        
         agent_state = agents[agent_id]
         utility_calculator = AgentUtility(risk_aversion=agent_state.risk_appetite)
-        
+
         # Base utility calculation
         base_utility = utility_calculator.compute_utility(
             action=action,
@@ -342,19 +504,147 @@ class NashEquilibriumSolver:
             network_state=agents,
             exposures=exposures,
         )
-        
-        # Adjust for uncertainty (risk premium)
+
+        # Adjust for uncertainty (risk premium from incomplete information)
         uncertainty_penalty = 0.0
+        # Map belief states to default probability multipliers
+        state_pd_map = {
+            "healthy": 0.01,
+            "stressed": 0.05,
+            "distressed": 0.20,
+            "defaulted": 1.00,
+        }
+
         for counterparty_id, belief_dist in beliefs.items():
-            if counterparty_id != agent_id:
-                # Variance in beliefs increases uncertainty
-                belief_variance = sum(
-                    p * (v - 0.5) ** 2 
-                    for v, p in belief_dist.items()
-                )
-                uncertainty_penalty += belief_variance * 0.1
-        
+            if counterparty_id == agent_id:
+                continue
+
+            if isinstance(belief_dist, dict):
+                probs = belief_dist
+            elif hasattr(belief_dist, 'beliefs'):
+                probs = belief_dist.beliefs
+            else:
+                continue
+
+            # Expected default probability from beliefs
+            expected_pd = sum(
+                probs.get(state, 0.0) * pd
+                for state, pd in state_pd_map.items()
+            )
+
+            # Variance in beliefs increases uncertainty
+            mean_prob = sum(probs.values()) / max(len(probs), 1)
+            belief_variance = sum(
+                (p - mean_prob) ** 2 for p in probs.values()
+            ) / max(len(probs), 1)
+
+            # Uncertainty penalty: higher variance = more cautious
+            uncertainty_penalty += belief_variance * 0.1
+
+            # Additional penalty if expected PD is high
+            uncertainty_penalty += expected_pd * 0.05
+
         return base_utility - uncertainty_penalty
+
+    def compute_pairwise_payoff_matrix(
+        self,
+        agent_i_id: UUID,
+        agent_j_id: UUID,
+        agents: Dict[UUID, AgentState],
+        exposures: Dict[Tuple[UUID, UUID], float],
+        action_space_i: List[AgentAction],
+        action_space_j: List[AgentAction],
+    ) -> "PayoffMatrix":
+        """
+        Compute the complete pairwise payoff matrix between two agents.
+
+        For each (action_i, action_j) pair, computes both agents' utilities.
+        Also identifies pure-strategy Nash equilibria in this 2-player sub-game.
+        """
+        entries = []
+        state_i = agents[agent_i_id]
+        state_j = agents[agent_j_id]
+        utility_i = AgentUtility(risk_aversion=state_i.risk_appetite)
+        utility_j = AgentUtility(risk_aversion=state_j.risk_appetite)
+
+        payoff_table_i: Dict[Tuple[str, str], float] = {}
+        payoff_table_j: Dict[Tuple[str, str], float] = {}
+
+        def _action_key(action: AgentAction) -> str:
+            key = (
+                action.action_type.value
+                if isinstance(action.action_type, ActionType)
+                else str(action.action_type)
+            )
+            if action.target_id:
+                key += f"_{str(action.target_id)[:8]}"
+            if action.parameters and action.parameters.get("decision"):
+                key += f"_{action.parameters['decision']}"
+            return key
+
+        for action_i in action_space_i:
+            for action_j in action_space_j:
+                ui = utility_i.compute_utility(action_i, state_i, agents, exposures)
+                uj = utility_j.compute_utility(action_j, state_j, agents, exposures)
+
+                ai_key = _action_key(action_i)
+                aj_key = _action_key(action_j)
+
+                entries.append(PayoffMatrixEntry(
+                    agent_i_id=agent_i_id,
+                    agent_j_id=agent_j_id,
+                    agent_i_action=ai_key,
+                    agent_j_action=aj_key,
+                    agent_i_payoff=ui,
+                    agent_j_payoff=uj,
+                ))
+                payoff_table_i[(ai_key, aj_key)] = ui
+                payoff_table_j[(ai_key, aj_key)] = uj
+
+        # Find Nash equilibria in the 2-player matrix
+        nash_eq = self._find_pure_nash_2player(payoff_table_i, payoff_table_j)
+
+        return PayoffMatrix(
+            agent_i_id=agent_i_id,
+            agent_j_id=agent_j_id,
+            entries=entries,
+            nash_equilibria=nash_eq,
+        )
+
+    def _find_pure_nash_2player(
+        self,
+        table_i: Dict[Tuple[str, str], float],
+        table_j: Dict[Tuple[str, str], float],
+    ) -> List[Tuple[str, str]]:
+        """Find pure-strategy Nash equilibria in a 2-player normal-form game"""
+        action_keys_i = list(set(k[0] for k in table_i.keys()))
+        action_keys_j = list(set(k[1] for k in table_i.keys()))
+
+        nash = []
+        for ai in action_keys_i:
+            for aj in action_keys_j:
+                # Check if ai is best response to aj for player i
+                i_payoffs_given_aj = {
+                    a: table_i.get((a, aj), float('-inf'))
+                    for a in action_keys_i
+                }
+                best_i = max(i_payoffs_given_aj.values())
+
+                # Check if aj is best response to ai for player j
+                j_payoffs_given_ai = {
+                    a: table_j.get((ai, a), float('-inf'))
+                    for a in action_keys_j
+                }
+                best_j = max(j_payoffs_given_ai.values())
+
+                current_i = table_i.get((ai, aj), float('-inf'))
+                current_j = table_j.get((ai, aj), float('-inf'))
+
+                if (abs(current_i - best_i) < self.tolerance and
+                        abs(current_j - best_j) < self.tolerance):
+                    nash.append((ai, aj))
+
+        return nash
 
 
 def generate_action_space(
@@ -363,13 +653,16 @@ def generate_action_space(
     counterparties: List[UUID],
 ) -> List[AgentAction]:
     """
-    Generate feasible action space for an agent
-    
+    Generate feasible action space for an agent.
+
+    Action magnitudes scale with agent state for realism.
+    All 6 action types are generated when conditions are met.
+
     Args:
         agent_id: Agent's ID
         agent_state: Current state
         counterparties: List of connected institutions
-    
+
     Returns:
         List of viable actions
     """
@@ -379,7 +672,12 @@ def generate_action_space(
             agent_id=agent_id,
         )
     ]
-    
+
+    # Agent-dependent magnitudes
+    credit_magnitude = max(500, min(5000, agent_state.credit_exposure * 0.1))
+    liquidity_magnitude = max(1000, min(10000, agent_state.credit_exposure * 0.05))
+    margin_magnitude = max(200, min(2000, agent_state.credit_exposure * 0.05))
+
     # Credit limit adjustments for each counterparty
     for cp_id in counterparties:
         # Increase credit
@@ -388,7 +686,7 @@ def generate_action_space(
                 action_type=ActionType.ADJUST_CREDIT_LIMIT,
                 agent_id=agent_id,
                 target_id=cp_id,
-                magnitude=1000.0,
+                magnitude=credit_magnitude,
             )
         )
         # Decrease credit
@@ -397,29 +695,77 @@ def generate_action_space(
                 action_type=ActionType.ADJUST_CREDIT_LIMIT,
                 agent_id=agent_id,
                 target_id=cp_id,
-                magnitude=-1000.0,
+                magnitude=-credit_magnitude,
             )
         )
-    
+
     # Liquidity decisions
     if agent_state.liquidity_buffer > 0.3:
         actions.append(
             AgentAction(
                 action_type=ActionType.LIQUIDITY_DECISION,
                 agent_id=agent_id,
-                magnitude=5000.0,
+                magnitude=liquidity_magnitude,
                 parameters={"decision": "RELEASE"},
             )
         )
-    
+
     if agent_state.stress_level > 0.4:
         actions.append(
             AgentAction(
                 action_type=ActionType.LIQUIDITY_DECISION,
                 agent_id=agent_id,
-                magnitude=5000.0,
+                magnitude=liquidity_magnitude,
                 parameters={"decision": "HOARD"},
             )
         )
-    
+
+    # Margin modifications — tighten when stressed, loosen when risk-seeking
+    for cp_id in counterparties:
+        if agent_state.stress_level > 0.3:
+            actions.append(
+                AgentAction(
+                    action_type=ActionType.MODIFY_MARGIN,
+                    agent_id=agent_id,
+                    target_id=cp_id,
+                    magnitude=margin_magnitude,
+                    parameters={"direction": "tighten"},
+                )
+            )
+        if agent_state.risk_appetite > 0.6:
+            actions.append(
+                AgentAction(
+                    action_type=ActionType.MODIFY_MARGIN,
+                    agent_id=agent_id,
+                    target_id=cp_id,
+                    magnitude=-margin_magnitude,
+                    parameters={"direction": "loosen"},
+                )
+            )
+
+    # Trade rerouting — when stressed and multiple counterparties available
+    if agent_state.is_stressed() and len(counterparties) > 1:
+        for cp_id in counterparties:
+            actions.append(
+                AgentAction(
+                    action_type=ActionType.REROUTE_TRADE,
+                    agent_id=agent_id,
+                    target_id=cp_id,
+                    magnitude=credit_magnitude,
+                    parameters={"from": str(cp_id)},
+                )
+            )
+
+    # Collateral calls — when liquidity is low
+    if agent_state.liquidity_buffer < 0.4:
+        for cp_id in counterparties:
+            actions.append(
+                AgentAction(
+                    action_type=ActionType.COLLATERAL_CALL,
+                    agent_id=agent_id,
+                    target_id=cp_id,
+                    magnitude=margin_magnitude * 2,
+                )
+            )
+
     return actions
