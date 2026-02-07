@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from app.tasks import celery_app
 from app.core.logging import logger
-from app.db.session import async_session_maker
+from app.db.session import async_session_factory
 from app.models.simulation import Simulation, SimulationStatus
 from app.models.institution import Institution
 from app.models.exposure import Exposure
@@ -44,7 +44,7 @@ class SimulationTask(Task):
     
     async def _mark_failed(self, simulation_id: str, error_message: str):
         """Mark simulation as failed in database"""
-        async with async_session_maker() as session:
+        async with async_session_factory() as session:
             result = await session.execute(
                 select(Simulation).where(Simulation.id == UUID(simulation_id))
             )
@@ -92,7 +92,7 @@ async def _execute_simulation(simulation_id: str, task: Task) -> Dict:
     Returns:
         Results dictionary
     """
-    async with async_session_maker() as session:
+    async with async_session_factory() as session:
         # Load simulation
         result = await session.execute(
             select(Simulation).where(Simulation.id == UUID(simulation_id))
