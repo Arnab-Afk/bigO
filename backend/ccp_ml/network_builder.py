@@ -366,7 +366,9 @@ class NetworkBuilder:
         """Get graph Laplacian matrix for spectral analysis"""
         if self.graph is None:
             return np.array([])
-        return nx.laplacian_matrix(self.graph, weight='weight').toarray()
+        # Laplacian requires undirected graph
+        undirected = self.graph.to_undirected()
+        return nx.laplacian_matrix(undirected, weight='weight').toarray()
     
     def find_communities(self) -> Dict[str, int]:
         """
