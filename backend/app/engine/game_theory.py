@@ -52,6 +52,10 @@ class AgentState:
     stress_level: float
     risk_appetite: float = 0.5  # 0-1 scale
     
+    # ML prediction fields
+    ml_prediction_confidence: float = 0.0  # Confidence in ML prediction [0-1]
+    ml_model_version: str = "none"  # Version of ML model used
+    
     def is_stressed(self) -> bool:
         """Check if agent is under stress"""
         return self.stress_level > 0.5 or self.liquidity_buffer < 0.3
