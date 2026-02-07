@@ -13,6 +13,8 @@ from app.db.session import get_db
 from app.models.institution import Institution
 from app.models.exposure import Exposure
 from app.models.institution_state import InstitutionState
+from app.engine.network import NetworkAnalyzer, build_network_graph
+from app.engine.contagion import ContagionPropagator
 
 router = APIRouter()
 
@@ -318,4 +320,263 @@ async def get_systemic_importance_ranking(
     return {
         "rankings": rankings[:limit],
         "total_institutions": len(rankings),
+    }
+
+
+@router.post("/analyze")
+async def compute_advanced_network_analysis(
+    min_exposure: Optional[float] = Query(None, description="Minimum exposure filter"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Compute advanced network metrics using graph algorithms.
+    
+    Includes betweenness, eigenvector, PageRank, and systemic risk indicators.
+    """
+    from datetime import datetime
+    
+    # Load network data
+    inst_query = select(Institution).where(Institution.is_active == True)
+    inst_result = await db.execute(inst_query)
+    institutions = inst_result.scalars().all()
+    
+    now = datetime.utcnow()
+    exp_query = select(Exposure).where(
+        or_(Exposure.valid_to.is_(None), Exposure.valid_to > now)
+    )
+    if min_exposure:
+        exp_query = exp_query.where(Exposure.gross_exposure >= min_exposure)
+    
+    exp_result = await db.execute(exp_query)
+    exposures = exp_result.scalars().all()
+    
+    # Build network graph
+    institutions_data = [
+        {
+            'id': str(inst.id),
+            'name': inst.name,
+            'type': inst.type.value,
+            'tier': inst.tier.value,
+        }
+        for inst in institutions
+    ]
+    
+    exposures_data = [
+        {
+            'source_institution_id': str(exp.source_institution_id),
+            'target_institution_id': str(exp.target_institution_id),
+            'exposure_type': exp.exposure_type.value,
+            'gross_exposure': float(exp.gross_exposure),
+            'contagion_probability': float(exp.contagion_probability),
+            'recovery_rate': float(exp.recovery_rate),
+            'settlement_urgency': float(exp.settlement_urgency),
+        }
+        for exp in exposures
+    ]
+    
+    network = build_network_graph(institutions_data, exposures_data)
+    
+    # Initialize analyzer
+    analyzer = NetworkAnalyzer(network)
+    
+    # Compute all centralities
+    centralities = analyzer.compute_all_centralities()
+    
+    # Compute network-level metrics
+    network_metrics = analyzer.compute_network_metrics()
+    
+    # Find bottlenecks
+    bottlenecks = analyzer.identify_bottlenecks(top_k=10)
+    
+    return {
+        "network_metrics": {
+            "node_count": network_metrics.node_count,
+            "edge_count": network_metrics.edge_count,
+            "density": round(network_metrics.density, 4),
+            "average_clustering": round(network_metrics.average_clustering, 4),
+            "average_path_length": round(network_metrics.average_path_length, 4) if network_metrics.average_path_length else None,
+            "diameter": network_metrics.diameter,
+            "concentration_index": round(network_metrics.concentration_index, 4),
+            "interconnectedness_score": round(network_metrics.interconnectedness_score, 4),
+            "complexity_score": round(network_metrics.complexity_score, 4),
+        },
+        "top_centralities": [
+            {
+                "institution_id": str(node_id),
+                "degree_centrality": round(cent.degree_centrality, 4),
+                "betweenness_centrality": round(cent.betweenness_centrality, 4),
+                "eigenvector_centrality": round(cent.eigenvector_centrality, 4),
+                "pagerank": round(cent.pagerank, 4),
+                "systemic_importance": round(cent.systemic_importance, 4),
+            }
+            for node_id, cent in sorted(
+                centralities.items(),
+                key=lambda x: x[1].systemic_importance,
+                reverse=True
+            )[:20]
+        ],
+        "bottleneck_nodes": [
+            {
+                "institution_id": str(node_id),
+                "impact_score": round(score, 4),
+            }
+            for node_id, score in bottlenecks
+        ],
+    }
+
+
+@router.post("/contagion-paths")
+async def find_contagion_paths(
+    source_id: UUID,
+    threshold: float = Query(0.3, ge=0.0, le=1.0),
+    max_length: int = Query(5, ge=1, le=10),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Find critical contagion paths from a source institution.
+    """
+    from datetime import datetime
+    
+    # Verify source institution exists
+    inst_result = await db.execute(
+        select(Institution).where(Institution.id == source_id)
+    )
+    source_inst = inst_result.scalar_one_or_none()
+    
+    if not source_inst:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Institution {source_id} not found"
+        )
+    
+    # Load network data
+    inst_query = select(Institution).where(Institution.is_active == True)
+    institutions = (await db.execute(inst_query)).scalars().all()
+    
+    now = datetime.utcnow()
+    exp_query = select(Exposure).where(
+        or_(Exposure.valid_to.is_(None), Exposure.valid_to > now)
+    )
+    exposures = (await db.execute(exp_query)).scalars().all()
+    
+    # Build network
+    institutions_data = [
+        {'id': str(i.id), 'name': i.name, 'type': i.type.value, 'tier': i.tier.value}
+        for i in institutions
+    ]
+    exposures_data = [
+        {
+            'source_institution_id': str(e.source_institution_id),
+            'target_institution_id': str(e.target_institution_id),
+            'exposure_type': e.exposure_type.value,
+            'gross_exposure': float(e.gross_exposure),
+            'contagion_probability': float(e.contagion_probability),
+            'recovery_rate': float(e.recovery_rate),
+            'settlement_urgency': float(e.settlement_urgency),
+        }
+        for e in exposures
+    ]
+    
+    network = build_network_graph(institutions_data, exposures_data)
+    analyzer = NetworkAnalyzer(network)
+    
+    # Find critical paths
+    paths = analyzer.find_critical_paths(
+        source=source_id,
+        threshold=threshold,
+        max_length=max_length
+    )
+    
+    return {
+        "source_institution_id": str(source_id),
+        "source_name": source_inst.name,
+        "threshold": threshold,
+        "paths_found": len(paths),
+        "critical_paths": [
+            {
+                "path": [str(node_id) for node_id in path.path],
+                "probability": round(path.probability, 4),
+                "total_exposure": float(path.total_exposure),
+                "path_length": path.path_length,
+                "risk_score": round(path.risk_score, 4),
+            }
+            for path in paths[:50]  # Limit to top 50
+        ],
+    }
+
+
+@router.post("/cascade-simulation")
+async def simulate_cascade(
+    shocked_institutions: List[UUID],
+    max_rounds: int = Query(10, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Simulate contagion cascade from initial shock.
+    """
+    from datetime import datetime
+    
+    # Load network
+    inst_query = select(Institution).where(Institution.is_active == True)
+    institutions = (await db.execute(inst_query)).scalars().all()
+    
+    now = datetime.utcnow()
+    exp_query = select(Exposure).where(
+        or_(Exposure.valid_to.is_(None), Exposure.valid_to > now)
+    )
+    exposures = (await db.execute(exp_query)).scalars().all()
+    
+    # Build network
+    institutions_data = [
+        {'id': str(i.id), 'name': i.name, 'type': i.type.value, 'tier': i.tier.value}
+        for i in institutions
+    ]
+    exposures_data = [
+        {
+            'source_institution_id': str(e.source_institution_id),
+            'target_institution_id': str(e.target_institution_id),
+            'exposure_type': e.exposure_type.value,
+            'gross_exposure': float(e.gross_exposure),
+            'contagion_probability': float(e.contagion_probability),
+            'recovery_rate': float(e.recovery_rate),
+            'settlement_urgency': float(e.settlement_urgency),
+        }
+        for e in exposures
+    ]
+    
+    network = build_network_graph(institutions_data, exposures_data)
+    propagator = ContagionPropagator(network)
+    
+    # Create initial state
+    from app.engine.contagion import PropagationState
+    
+    initial_state = PropagationState(
+        capital_levels={UUID(i['id']): 10000.0 for i in institutions_data},
+        liquidity_levels={UUID(i['id']): 0.5 for i in institutions_data},
+        stress_levels={UUID(i['id']): 0.1 for i in institutions_data},
+        defaulted=set(),
+    )
+    
+    # Run cascade
+    final_state, cascade_history = propagator.propagate_shock(
+        initial_state=initial_state,
+        shocked_institutions=shocked_institutions,
+        max_rounds=max_rounds
+    )
+    
+    return {
+        "initial_shocks": [str(inst_id) for inst_id in shocked_institutions],
+        "cascade_rounds": len(cascade_history),
+        "total_defaults": len(final_state.defaulted),
+        "total_losses": float(sum(c.total_losses for c in cascade_history)),
+        "cascade_history": [
+            {
+                "round": cascade.round_number,
+                "defaults": len(cascade.defaults),
+                "losses": float(cascade.total_losses),
+                "affected": [str(inst_id) for inst_id in cascade.affected_institutions],
+            }
+            for cascade in cascade_history
+        ],
+        "final_defaulted": [str(inst_id) for inst_id in final_state.defaulted],
     }

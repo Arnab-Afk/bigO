@@ -4,6 +4,15 @@
 
 Network-Based Game-Theoretic Modeling of Financial Infrastructure
 
+### 🎯 Key Features
+
+- **Game-Theoretic Modeling** - Nash equilibrium computation for strategic agents
+- **Advanced Network Analysis** - Centrality metrics, path finding, bottleneck detection  
+- **Multi-Mechanism Contagion** - Credit, liquidity, margin, and information cascades
+- **Bayesian Beliefs** - Incomplete information and signal processing
+- **Async Simulation Engine** - Celery-based background task execution
+- **Graph Database Integration** - Neo4j for complex network queries
+
 ---
 
 ## 🚀 Quick Start
@@ -46,6 +55,11 @@ Network-Based Game-Theoretic Modeling of Financial Infrastructure
 6. **Run database migrations**:
    ```bash
    alembic upgrade head
+   ```
+
+7. **Start Celery worker** (in separate terminal):
+   ```bash
+   celery -A app.tasks worker --loglevel=info
    ```
 
 7. **Seed sample data** (optional):
@@ -98,6 +112,14 @@ backend/
 │   │   ├── exposure.py
 │   │   ├── simulation.py
 │   │   └── scenario.py
+│   ├── engine/              # 🆕 Simulation Engine
+│   │   ├── game_theory.py   # Nash equilibrium & utility functions
+│   │   ├── network.py       # Centrality & path analysis
+│   │   ├── contagion.py     # Cascade propagation
+│   │   ├── bayesian.py      # Belief updates & signals
+│   │   └── simulation.py    # Orchestrator
+│   ├── tasks/               # 🆕 Celery background tasks
+│   │   └── simulation_tasks.py
 │   └── main.py              # FastAPI application
 ├── scripts/
 │   └── seed_data.py         # Data seeding
@@ -147,6 +169,9 @@ backend/
 | GET | `/api/v1/network/metrics` | Network-level metrics |
 | GET | `/api/v1/network/centrality/{id}` | Institution centrality |
 | GET | `/api/v1/network/systemic-importance` | Systemic importance ranking |
+| POST | `/api/v1/network/analyze` | 🆕 Advanced analysis (all centralities) |
+| POST | `/api/v1/network/contagion-paths` | 🆕 Find contagion paths |
+| POST | `/api/v1/network/cascade-simulation` | 🆕 Simulate cascade |
 
 ### Simulations
 | Method | Endpoint | Description |
@@ -196,7 +221,40 @@ backend/
 
 ---
 
-## 🧪 Testing
+## � Simulation Engine
+
+### Game-Theoretic Modeling
+The engine implements strategic agent behavior using:
+- **Utility Functions**: `U_i = Revenue - ρ·Risk - λ·Liquidity - γ·Regulatory`
+- **Nash Equilibrium**: Best response iteration for agent decisions
+- **Action Space**: Credit adjustments, margin changes, liquidity decisions
+
+### Network Analysis Capabilities
+- **Centrality Metrics**: Degree, betweenness, eigenvector, PageRank, Katz, closeness
+- **Path Finding**: Critical contagion paths with probability thresholds
+- **Bottleneck Detection**: Nodes whose failure most disrupts network flow
+- **Systemic Risk Indices**: HHI concentration, interconnectedness, complexity
+
+### Contagion Mechanisms
+1. **Credit Contagion**: `Loss_j = Σ LGD × Exposure × Default_Indicator`
+2. **Liquidity Spirals**: `Price_{t+1} = Price_t × (1 - α × FireSales_t)`
+3. **Margin Spirals**: `Margin_t = VaR × (1 + β × Volatility_t)`
+4. **Information Contagion**: `P(default_j | default_i) > P(default_j)`
+
+### Bayesian Belief System
+- **Signal Processing**: Noisy observations with reliability scores
+- **Belief Updates**: `P(θ|signal) ∝ P(signal|θ) × P(θ)`
+- **Entropy Tracking**: Measure uncertainty in agent beliefs
+- **Belief Cascades**: Detect coordinated belief shifts
+
+### Async Execution
+- **Celery Tasks**: Background simulation execution
+- **Real-time Updates**: Progress tracking via database
+- **Monte Carlo**: Parameter variation across multiple runs
+
+---
+
+## �🧪 Testing
 
 ```bash
 # Run all tests

@@ -19,6 +19,8 @@ from app.schemas.simulation import (
     SimulationResultResponse,
     SimulationListResponse,
 )
+from app.tasks.simulation_tasks import run_simulation_task
+from app.core.logging import logger
 
 router = APIRouter()
 
@@ -120,10 +122,23 @@ async def create_simulation(
     db.add(simulation)
     await db.flush()
     await db.refresh(simulation)
+    await db.commit()
     
-    # Queue simulation for execution (placeholder)
-    # In production, this would dispatch to Celery
-    # background_tasks.add_task(run_simulation, simulation.id)
+    # Dispatch to Celery for background execution
+    try:
+        task = run_simulation_task.delay(str(simulation.id))
+        logger.info(
+            "Simulation task queued",
+            simulation_id=str(simulation.id),
+            task_id=task.id
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to queue simulation",
+            simulation_id=str(simulation.id),
+            error=str(e)
+        )
+        # Don't fail the request, simulation can be started manually
     
     response = SimulationResponse.model_validate(simulation)
     response.progress = 0.0
@@ -155,11 +170,29 @@ async def start_simulation(
             detail=f"Simulation is not in PENDING status (current: {simulation.status.value})"
         )
     
-    # Update status
+    # Update status and dispatch task
     simulation.status = SimulationStatus.QUEUED
     simulation.started_at = datetime.utcnow()
+    await db.commit()
     
-    await db.flush()
+    # Dispatch to Celery
+    try:
+        task = run_simulation_task.delay(str(simulation.id))
+        logger.info(
+            "Simulation task started",
+            simulation_id=str(simulation.id),
+            task_id=task.id
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to start simulation",
+            simulation_id=str(simulation.id),
+            error=str(e)
+        )
+        simulation.status = SimulationStatus.FAILED
+        simulation.error_message = f"Failed to queue task: {str(e)}"
+        await db.commit()
+    
     await db.refresh(simulation)
     
     response = SimulationResponse.model_validate(simulation)
