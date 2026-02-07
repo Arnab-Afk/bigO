@@ -311,11 +311,11 @@ async def get_spectral_analysis():
         "spectral_radius": results.spectral_radius,
         "fiedler_value": results.fiedler_value,
         "spectral_gap": results.spectral_gap,
-        "effective_resistance": results.effective_resistance,
+        "effective_rank": results.effective_rank,
+        "eigenvalue_entropy": results.eigenvalue_entropy,
         "amplification_risk": results.amplification_risk,
         "fragmentation_risk": results.fragmentation_risk,
-        "contagion_index": state.spectral_analyzer.compute_contagion_index(),
-        "eigenvalue_distribution": results.eigenvalue_distribution[:10] if results.eigenvalue_distribution else []
+        "contagion_index": state.spectral_analyzer.compute_contagion_index()
     }
 
 @app.post("/api/stress-test")
