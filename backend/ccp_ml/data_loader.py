@@ -457,7 +457,26 @@ class DataLoader:
         
         try:
             # Download data
-            df = yf.download(tickers, start=start_date, end=end_date)['Adj Close']
+            raw_df = yf.download(tickers, start=start_date, end=end_date)
+            
+            # Handle different yfinance column formats
+            if isinstance(raw_df.columns, pd.MultiIndex):
+                # New format: multi-level columns
+                if 'Adj Close' in raw_df.columns.get_level_values(0):
+                    df = raw_df['Adj Close']
+                elif 'Close' in raw_df.columns.get_level_values(0):
+                    df = raw_df['Close']
+                else:
+                    # Just get the first price column
+                    df = raw_df.iloc[:, :len(tickers)]
+            else:
+                # Old format: single-level columns
+                if 'Adj Close' in raw_df.columns:
+                    df = raw_df['Adj Close']
+                elif 'Close' in raw_df.columns:
+                    df = raw_df['Close']
+                else:
+                    df = raw_df
             
             # Compute log returns
             returns = np.log(df / df.shift(1)).dropna()
@@ -465,14 +484,14 @@ class DataLoader:
             # Compute rolling volatility (21-day)
             volatility = returns.rolling(window=21).std() * np.sqrt(252)
             
-            # Compute rolling correlations
-            correlations = returns.rolling(window=63).corr()
+            # Compute rolling correlations (latest snapshot)
+            correlations = returns.corr()
             
             result = {
                 'prices': df,
                 'returns': returns,
                 'volatility': volatility,
-                'correlations': correlations
+                'correlation': correlations
             }
             
             logger.info(f"Loaded market data for {len(tickers)} tickers")

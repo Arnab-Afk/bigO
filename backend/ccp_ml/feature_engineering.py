@@ -185,9 +185,10 @@ class FeatureEngineer:
         
         return features
     
-    def _fuzzy_lookup(self, bank_name: str, mapping: Dict, key: str) -> Optional[float]:
+    def _fuzzy_lookup(self, bank_name, mapping: Dict, key: str) -> Optional[float]:
         """Fuzzy lookup for bank name in mapping"""
-        if pd.isna(bank_name):
+        # Handle non-string input
+        if pd.isna(bank_name) or not isinstance(bank_name, str):
             return np.nan
         
         # Direct match
@@ -195,8 +196,11 @@ class FeatureEngineer:
             return mapping[bank_name].get(key, np.nan)
         
         # Fuzzy matching
-        bank_upper = bank_name.upper()
+        bank_upper = str(bank_name).upper()
         for mapped_name in mapping.keys():
+            # Skip non-string keys (e.g., NaN)
+            if not isinstance(mapped_name, str):
+                continue
             if mapped_name.upper() in bank_upper or bank_upper in mapped_name.upper():
                 return mapping[mapped_name].get(key, np.nan)
         
