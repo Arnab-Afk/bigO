@@ -221,7 +221,15 @@ def main():
         )
     except Exception as e:
         logger.error(f"Failed to load data: {e}")
-      Augment with synthetic data if requested
+        logger.info("\nTroubleshooting:")
+        logger.info("  1. Check column names match: --id-col, --label-col")
+        logger.info("  2. Ensure 'defaulted' column has 0/1 values")
+        logger.info("  3. Check for missing values in key columns")
+        sys.exit(1)
+    
+    logger.info(f"✓ Loaded {len(features)} samples")
+    
+    # Augment with synthetic data if requested
     if args.augment_synthetic > 0:
         logger.info(f"\n{'=' * 60}")
         logger.info("AUGMENTING WITH SYNTHETIC DATA")
@@ -241,14 +249,6 @@ def main():
         labels.extend(synthetic_labels)
         
         logger.info(f"✓ Total dataset: {len(features)} samples (Real: {len(features) - len(synthetic_features)}, Synthetic: {len(synthetic_features)})")
-    
-    #   logger.info("\nTroubleshooting:")
-        logger.info("  1. Check column names match: --id-col, --label-col")
-        logger.info("  2. Ensure 'defaulted' column has 0/1 values")
-        logger.info("  3. Check for missing values in key columns")
-        sys.exit(1)
-    
-    logger.info(f"✓ Loaded {len(features)} samples")
     
     # Create dataset
     logger.info("\n" + "=" * 60)
