@@ -12,11 +12,12 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import asdict
+import asyncio
 
 # Add parent directory for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -26,6 +27,16 @@ from ccp_ml import (
     DataLoader, FeatureEngineer, NetworkBuilder,
     SpectralAnalyzer, CCPRiskModel, CCPEngine
 )
+
+# Import new modules
+try:
+    from .realtime_simulation import RealtimeSimulation
+    from .graph_generator import GraphGenerator
+    REALTIME_AVAILABLE = True
+except ImportError:
+    REALTIME_AVAILABLE = False
+    RealtimeSimulation = None
+    GraphGenerator = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -64,6 +75,10 @@ class SimulationState:
         self.ccp_engine = None
         self.last_run = None
         self.is_initialized = False
+        # New realtime components
+        self.realtime_sim = None
+        self.graph_generator = None
+        self.websocket_clients: List[WebSocket] = []
 
 state = SimulationState()
 
@@ -85,6 +100,19 @@ class StressTestConfig(BaseModel):
 
 class BankQuery(BaseModel):
     bank_name: str
+
+class RealtimeSimConfig(BaseModel):
+    max_timesteps: int = Field(100, ge=1, le=1000)
+    shock_config: Optional[Dict] = None
+    
+class SimStepCommand(BaseModel):
+    n_steps: int = Field(1, ge=1, le=100)
+    shock_config: Optional[Dict] = None
+
+class GraphRequest(BaseModel):
+    graph_type: str = Field(..., description="Type: network, risk_distribution, time_series, spectral")
+    format: str = Field("plotly", description="Format: plotly or matplotlib")
+    highlight_nodes: Optional[List[str]] = None
 
 # ============================================
 # Initialization
@@ -124,6 +152,20 @@ def initialize_simulation():
         spectral_analyzer=state.spectral_analyzer
     )
     
+    # Initialize realtime simulation
+    if REALTIME_AVAILABLE and RealtimeSimulation:
+        state.realtime_sim = RealtimeSimulation(
+            loader, engineer, state.network_builder,
+            state.spectral_analyzer, state.risk_model, state.ccp_engine
+        )
+        state.realtime_sim.initialize(state.features)
+        logger.info("Realtime simulation initialized")
+    
+    # Initialize graph generator
+    if REALTIME_AVAILABLE and GraphGenerator:
+        state.graph_generator = GraphGenerator()
+        logger.info("Graph generator initialized")
+    
     state.is_initialized = True
     state.last_run = datetime.now()
     
@@ -142,24 +184,38 @@ async def startup_event():
 async def root():
     """Health check"""
     return {
-        "status": "online",
+        "status": "online" if state.is_initialized else "initializing",
         "service": "CCP Risk Simulation API",
         "initialized": state.is_initialized,
-        "last_run": state.last_run.isoformat() if state.last_run else None
+        "last_run": state.last_run.isoformat() if state.last_run else None,
+        "version": "1.0.0",
+        "features": {
+            "realtime_simulation": state.realtime_sim is not None,
+            "graph_generation": state.graph_generator is not None,
+            "websocket": True
+        }
     }
 
 @app.get("/api/status")
 async def get_status():
     """Get simulation status"""
     if not state.is_initialized:
-        return {"status": "not_initialized"}
+        return {"status": "not_initialized", "initialized": False}
+    
+    num_banks = len(state.data.banks) if state.data else 0
+    num_edges = len(state.network_builder.edges) if state.network_builder else 0
     
     return {
         "status": "ready",
-        "n_banks": len(state.data.banks) if state.data else 0,
+        "initialized": True,
+        "num_banks": num_banks,
+        "n_banks": num_banks,  # Alias for compatibility
+        "num_edges": num_edges,
         "n_features": len(state.features.columns) if state.features is not None else 0,
-        "n_edges": len(state.network_builder.edges) if state.network_builder else 0,
-        "last_run": state.last_run.isoformat() if state.last_run else None
+        "n_edges": num_edges,  # Alias for compatibility
+        "last_run": state.last_run.isoformat() if state.last_run else None,
+        "realtime_available": state.realtime_sim is not None,
+        "graph_generator_available": state.graph_generator is not None
     }
 
 @app.post("/api/simulate")
@@ -442,6 +498,224 @@ async def reinitialize():
         return {"status": "success", "message": "Simulation reinitialized"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================
+# Real-time Simulation Endpoints
+# ============================================
+
+@app.post("/api/realtime/init")
+async def init_realtime_simulation(config: RealtimeSimConfig):
+    """Initialize real-time simulation"""
+    if not state.realtime_sim:
+        raise HTTPException(status_code=400, detail="Realtime simulation not available")
+    
+    try:
+        state.realtime_sim.reset(max_timesteps=config.max_timesteps)
+        state.realtime_sim.initialize(state.features)
+        
+        return {
+            "status": "success",
+            "max_timesteps": config.max_timesteps,
+            "current_timestep": 0,
+            "message": "Realtime simulation initialized"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/realtime/step")
+async def step_realtime_simulation(command: SimStepCommand):
+    """Execute simulation timesteps"""
+    if not state.realtime_sim:
+        raise HTTPException(status_code=400, detail="Realtime simulation not available")
+    
+    if not state.realtime_sim.initial_features is not None:
+        raise HTTPException(status_code=400, detail="Simulation not initialized. Call /api/realtime/init first")
+    
+    try:
+        steps = state.realtime_sim.run_multiple_steps(
+            command.n_steps,
+            command.shock_config
+        )
+        
+        # Broadcast to WebSocket clients
+        for client in state.websocket_clients:
+            try:
+                await client.send_json({
+                    "type": "simulation_update",
+                    "data": [asdict(step) for step in steps]
+                })
+            except:
+                pass
+        
+        return {
+            "status": "success",
+            "steps_executed": len(steps),
+            "current_timestep": state.realtime_sim.current_timestep,
+            "latest_state": asdict(steps[-1]) if steps else None
+        }
+    except Exception as e:
+        logger.error(f"Simulation step error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/realtime/status")
+async def get_realtime_status():
+    """Get current realtime simulation status"""
+    if not state.realtime_sim:
+        return {"available": False}
+    
+    return {
+        "available": True,
+        "is_running": state.realtime_sim.is_running,
+        "current_timestep": state.realtime_sim.current_timestep,
+        "max_timesteps": state.realtime_sim.max_timesteps,
+        "history_length": len(state.realtime_sim.history),
+        "initialized": state.realtime_sim.initial_features is not None
+    }
+
+@app.get("/api/realtime/history")
+async def get_simulation_history():
+    """Get full simulation history"""
+    if not state.realtime_sim:
+        raise HTTPException(status_code=400, detail="Realtime simulation not available")
+    
+    return {
+        "history": state.realtime_sim.get_history(),
+        "total_timesteps": len(state.realtime_sim.history)
+    }
+
+@app.post("/api/realtime/stop")
+async def stop_realtime_simulation():
+    """Stop running simulation"""
+    if not state.realtime_sim:
+        raise HTTPException(status_code=400, detail="Realtime simulation not available")
+    
+    state.realtime_sim.stop()
+    return {"status": "success", "message": "Simulation stopped"}
+
+# ============================================
+# Graph Generation Endpoints
+# ============================================
+
+@app.post("/api/graphs/generate")
+async def generate_graph(request: GraphRequest):
+    """Generate visualization graph"""
+    if not state.graph_generator:
+        raise HTTPException(status_code=400, detail="Graph generator not available")
+    
+    try:
+        if request.graph_type == "network":
+            if not state.network_builder:
+                raise HTTPException(status_code=400, detail="Network not initialized")
+            result = state.graph_generator.generate_network_graph(
+                state.network_builder,
+                highlight_nodes=request.highlight_nodes,
+                format=request.format
+            )
+        
+        elif request.graph_type == "risk_distribution":
+            if state.features is None:
+                raise HTTPException(status_code=400, detail="No risk data available")
+            result = state.graph_generator.generate_risk_distribution(
+                state.features,
+                format=request.format
+            )
+        
+        elif request.graph_type == "time_series":
+            if not state.realtime_sim or not state.realtime_sim.history:
+                raise HTTPException(status_code=400, detail="No simulation history available")
+            result = state.graph_generator.generate_time_series(
+                state.realtime_sim.get_history(),
+                format=request.format
+            )
+        
+        elif request.graph_type == "spectral":
+            if not state.spectral_analyzer or not state.network_builder:
+                raise HTTPException(status_code=400, detail="Spectral analysis not available")
+            spectral_results = state.spectral_analyzer.analyze(network_builder=state.network_builder)
+            result = state.graph_generator.generate_spectral_analysis(
+                {
+                    'spectral_radius': spectral_results.spectral_radius,
+                    'fiedler_value': spectral_results.fiedler_value,
+                    'spectral_gap': spectral_results.spectral_gap,
+                    'contagion_index': state.spectral_analyzer.compute_contagion_index()
+                },
+                eigenvalues=spectral_results.eigenvalues if hasattr(spectral_results, 'eigenvalues') else None,
+                format=request.format
+            )
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown graph type: {request.graph_type}")
+        
+        return result
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Graph generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/graphs/available")
+async def get_available_graphs():
+    """Get list of available graph types"""
+    return {
+        "graphs": [
+            {
+                "type": "network",
+                "description": "Banking network topology with centrality metrics",
+                "requires": ["network_initialized"]
+            },
+            {
+                "type": "risk_distribution",
+                "description": "Risk distribution histograms and pie charts",
+                "requires": ["features_available"]
+            },
+            {
+                "type": "time_series",
+                "description": "Time series plots from simulation history",
+                "requires": ["simulation_history"]
+            },
+            {
+                "type": "spectral",
+                "description": "Spectral analysis plots with eigenvalues",
+                "requires": ["spectral_analysis"]
+            }
+        ],
+        "formats": ["plotly", "matplotlib"]
+    }
+
+# ============================================
+# WebSocket for Real-time Updates
+# ============================================
+
+@app.websocket("/ws/simulation")
+async def websocket_simulation(websocket: WebSocket):
+    """WebSocket endpoint for real-time simulation updates"""
+    await websocket.accept()
+    state.websocket_clients.append(websocket)
+    logger.info(f"WebSocket client connected. Total clients: {len(state.websocket_clients)}")
+    
+    try:
+        while True:
+            # Wait for messages or commands from client
+            data = await websocket.receive_text()
+            command = json.loads(data)
+            
+            if command.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+            
+            elif command.get("type") == "subscribe":
+                await websocket.send_json({
+                    "type": "subscribed",
+                    "message": "Subscribed to simulation updates"
+                })
+    
+    except WebSocketDisconnect:
+        state.websocket_clients.remove(websocket)
+        logger.info(f"WebSocket client disconnected. Total clients: {len(state.websocket_clients)}")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        if websocket in state.websocket_clients:
+            state.websocket_clients.remove(websocket)
 
 # ============================================
 # Run Server

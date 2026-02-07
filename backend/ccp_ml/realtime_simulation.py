@@ -12,6 +12,13 @@ from dataclasses import dataclass, asdict
 import pandas as pd
 import numpy as np
 
+try:
+    import networkx as nx
+    NETWORKX_AVAILABLE = True
+except ImportError:
+    NETWORKX_AVAILABLE = False
+    nx = None
+
 logger = logging.getLogger(__name__)
 
 
