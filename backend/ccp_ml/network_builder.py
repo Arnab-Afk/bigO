@@ -97,14 +97,41 @@ class NetworkBuilder:
         Returns:
             NetworkX DiGraph with bank nodes and weighted edges
         """
-        # Get list of banks
-        banks = data.banks if data.banks else []
-        if not banks and data.ml_ready is not None:
-            banks = data.ml_ready['bank_name'].unique().tolist()
+        # Get list of banks from sector exposure data (has real bank names)
+        banks = []
+        
+        # Priority: sector_exposures > crar > npa_movements > ml_ready
+        if data.sector_exposures is not None and 'bank_name' in data.sector_exposures.columns:
+            df = data.sector_exposures
+            if year is not None:
+                df = df[df['year'] == year]
+            else:
+                # Use latest year
+                df = df[df['year'] == df['year'].max()]
+            banks = df['bank_name'].dropna().unique().tolist()
+        elif data.crar is not None and 'bank_name' in data.crar.columns:
+            df = data.crar
+            if year is not None:
+                df = df[df['year'] == year]
+            else:
+                df = df[df['year'] == df['year'].max()]
+            banks = df['bank_name'].dropna().unique().tolist()
+        elif data.npa_movements is not None and 'bank_name' in data.npa_movements.columns:
+            df = data.npa_movements
+            if year is not None:
+                df = df[df['year'] == year]
+            else:
+                df = df[df['year'] == df['year'].max()]
+            banks = df['bank_name'].dropna().unique().tolist()
+        
+        # Filter out any non-string bank names
+        banks = [b for b in banks if isinstance(b, str) and len(b) > 2]
         
         if len(banks) < 2:
-            logger.warning("Need at least 2 banks to build network")
+            logger.warning(f"Need at least 2 banks to build network, found {len(banks)}")
             return nx.DiGraph()
+        
+        logger.info(f"Building network for {len(banks)} banks")
         
         # Initialize graph
         self.graph = nx.DiGraph()
