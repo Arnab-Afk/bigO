@@ -68,8 +68,8 @@ export default function MLDashboardPage() {
   const latestStep = realtimeHistory?.history?.[realtimeHistory.history.length - 1];
 
   // Romputed values
-  const totalBanks = status?.n_banks || status?.num_banks || 0;
-  const totalEdges = status?.n_edges || status?.num_edges || 0;
+  const totalBanks = status?.n_banks || 0;
+  const totalEdges = status?.n_edges || 0;
   const spectralRadius = spectral?.spectral_radius || 0;
   const fiedlerValue = spectral?.fiedler_value || 0;
   const contagionIndex = spectral?.contagion_index || 0;

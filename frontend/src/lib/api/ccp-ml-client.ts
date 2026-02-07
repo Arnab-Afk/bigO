@@ -12,8 +12,12 @@ export interface CCPStatus {
   initialized?: boolean;
   last_run?: string;
   n_banks?: number;
+  num_banks?: number; // Alias for compatibility
   n_features?: number;
   n_edges?: number;
+  num_edges?: number; // Alias for compatibility
+  realtime_available?: boolean;
+  graph_generator_available?: boolean;
 }
 
 export interface SimulationConfig {
