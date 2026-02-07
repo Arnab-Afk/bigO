@@ -6,7 +6,7 @@ Based on Technical Documentation Section 5.3.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 
 import numpy as np

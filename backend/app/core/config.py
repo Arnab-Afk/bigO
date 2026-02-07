@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
     API_PREFIX: str = "/api/v1"
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    ALLOWED_ORIGINS: List[str] = ["*"]
     
     # PostgreSQL Database
     POSTGRES_HOST: str = "localhost"
@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     
     # Redis
     REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
+    REDIS_PORT: int = 6380
     REDIS_DB: int = 0
     
     @property
