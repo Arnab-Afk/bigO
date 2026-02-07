@@ -186,12 +186,22 @@ class RBIDataCleaner:
             neighbor_avg_capital = capital_ratio * np.random.uniform(0.9, 1.1)
             
             # Create label: default indicator
-            # Banks with very low capital, high NPA, high stress -> label as risky (1)
-            # This is synthetic but realistic
+            # Use a risk score approach to create balanced labels
+            # Banks need MULTIPLE severe conditions to be labeled as defaulted
+            
+            # Calculate risk score (0-1 scale)
+            capital_risk = 1.0 if capital_ratio < 0.08 else (0.5 if capital_ratio < 0.10 else 0.0)
+            npa_risk = 1.0 if npa_ratio > 0.85 else (0.5 if npa_ratio > 0.70 else 0.0)
+            stress_risk = 1.0 if stress_level > 0.80 else (0.5 if stress_level > 0.65 else 0.0)
+            
+            total_risk_score = capital_risk + npa_risk + stress_risk
+            
+            # Label as defaulted (1) only if:
+            # - Risk score >= 2.0 (at least 2 severe conditions OR multiple moderate ones)
+            # - OR capital ratio is critically low (< 0.06) regardless of other factors
             default_indicator = int(
-                (capital_ratio < 0.10) or 
-                (npa_ratio > 0.8) or 
-                (stress_level > 0.75)
+                (total_risk_score >= 2.0) or 
+                (capital_ratio < 0.06)
             )
             
             record = {
@@ -267,9 +277,22 @@ class RBIDataCleaner:
                 noisy_row['bank_name'] = f"{row['bank_name']} (Aug {i})"
                 
                 # Recalculate label based on noisy features
+                # Use same risk scoring approach as original
+                noisy_capital_ratio = noisy_row['capital_ratio']
+                noisy_stress = noisy_row['stress_level']
+                
+                # Estimate NPA ratio from stress level (approximate relationship)
+                estimated_npa_ratio = noisy_stress * 0.6
+                
+                capital_risk = 1.0 if noisy_capital_ratio < 0.08 else (0.5 if noisy_capital_ratio < 0.10 else 0.0)
+                npa_risk = 1.0 if estimated_npa_ratio > 0.85 else (0.5 if estimated_npa_ratio > 0.70 else 0.0)
+                stress_risk = 1.0 if noisy_stress > 0.80 else (0.5 if noisy_stress > 0.65 else 0.0)
+                
+                total_risk_score = capital_risk + npa_risk + stress_risk
+                
                 noisy_row['defaulted'] = int(
-                    (noisy_row['capital_ratio'] < 0.10) or 
-                    (noisy_row['stress_level'] > 0.75)
+                    (total_risk_score >= 2.0) or 
+                    (noisy_capital_ratio < 0.06)
                 )
                 
                 augmented.append(noisy_row)
@@ -323,9 +346,18 @@ def main():
     
     # Process data
     cleaner = RBIDataCleaner()
-    df = cleaner.process_all(augment=True, n_copies=5)
+    df = cleaner.p\nCLASS DISTRIBUTION:")
+    logger.info(f"  Defaulted (1):     {df['defaulted'].sum():4d} ({df['defaulted'].mean()*100:5.1f}%)")
+    logger.info(f"  Non-defaulted (0): {(df['defaulted'] == 0).sum():4d} ({(1-df['defaulted'].mean())*100:5.1f}%)")
     
-    # Save output
+    # Warn if imbalanced
+    default_ratio = df['defaulted'].mean()
+    if default_ratio == 0 or default_ratio == 1:
+        logger.warning("\n⚠️  WARNING: Only one class present!")
+        logger.warning("    This dataset cannot be used for binary classification.")
+    elif default_ratio < 0.1 or default_ratio > 0.9:
+        logger.warning(f"\n⚠️  WARNING: Highly imbalanced ({default_ratio:.1%} default rate)")
+        logger.warning("    Consider adjusting labeling thresholds in the script.
     output_file = cleaner.data_dir / "rbi_banks_ml_ready.csv"
     df.to_csv(output_file, index=False)
     logger.info(f"\n✅ Saved cleaned data to: {output_file}")

@@ -73,6 +73,17 @@ def inspect_data(csv_path: str):
         logger.info(f"  Defaults: {default_count} ({default_ratio*100:.1f}%)")
         logger.info(f"  Non-defaults: {len(df) - default_count} ({(1-default_ratio)*100:.1f}%)")
         
+        # Check for single class
+        if default_count == 0 or default_count == len(df):
+            logger.error("\n❌ CRITICAL ERROR: Only one class present!")
+            if default_count == 0:
+                logger.error("   All samples are non-defaults (all 0s)")
+            else:
+                logger.error("   All samples are defaults (all 1s)")
+            logger.error("\n   Binary classification requires BOTH classes.")
+            logger.error("   Please check your 'defaulted' column has mixed 0s and 1s.")
+            return False
+        
         if default_ratio < 0.05 or default_ratio > 0.95:
             logger.warning(f"⚠️  Highly imbalanced dataset (default ratio: {default_ratio:.1%})")
         
@@ -228,6 +239,50 @@ def main():
         sys.exit(1)
     
     logger.info(f"✓ Loaded {len(features)} samples")
+    
+    # Check for both classes
+    unique_labels = set(labels)
+    if len(unique_labels) < 2:
+        logger.error("=" * 60)
+        logger.error("❌ CRITICAL ERROR: Only one class in dataset!")
+        logger.error("=" * 60)
+        logger.error(f"Your data has only class: {unique_labels}")
+        logger.error("Binary classification requires both classes (0 and 1)")
+        logger.error("")
+        logger.error("This happens when:")
+        logger.error("  • 'defaulted' column has only 0s or only 1s")
+        logger.error("  • Data filtering removed all samples of one class")
+        logger.error("  • Column was not properly labeled")
+        logger.error("")
+        logger.error("SOLUTIONS:")
+        logger.error("  1. Check your CSV 'defaulted' column has both 0 and 1")
+        logger.error("  2. Use synthetic data instead:")
+        logger.error("     python3 scripts/train_ml_model.py --simulations 100")
+        logger.error("  3. Generate mixed data:")
+        logger.error("     python3 scripts/train_rbi_data.py --augment-synthetic 500")
+        logger.error("")
+        
+        # Offer automatic fix
+        logger.info("🔧 AUTO-FIX OPTION:")
+        logger.info("   Since your dataset has only one class, I can generate")
+        logger.info("   synthetic data with both classes for training.")
+        logger.info("")
+        response = input("Generate 1000 synthetic samples for training? [Y/n]: ").strip().lower()
+        
+        if not response or response == 'y':
+            logger.info("\nGenerating synthetic training data...")
+            from app.ml.data.synthetic_generator import SyntheticDataGenerator
+            
+            generator = SyntheticDataGenerator()
+            features, labels = generator.generate_balanced_dataset(
+                target_samples=1000,
+                default_ratio=0.3,
+            )
+            logger.info(f"✓ Generated {len(features)} synthetic samples")
+            logger.info(f"  Defaults: {sum(labels)}, Non-defaults: {len(labels) - sum(labels)}")
+        else:
+            logger.error("\nTraining cancelled. Please fix your data and try again.")
+            sys.exit(1)
     
     # Augment with synthetic data if requested
     if args.augment_synthetic > 0:
