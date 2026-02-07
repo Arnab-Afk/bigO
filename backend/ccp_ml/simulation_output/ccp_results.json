@@ -1,0 +1,881 @@
+{
+  "timestamp": "2026-02-07T21:50:45.817197",
+  "risk_scores": [],
+  "margins": [
+    {
+      "bank_name": "2025",
+      "base_margin": 0.03660752280153996,
+      "network_addon": 0.01098225684046199,
+      "total_margin": 0.04758977964200195,
+      "explanation": "Higher margin due to systemic importance (network score: 1.00)"
+    },
+    {
+      "bank_name": "2025 (Aug 0)",
+      "base_margin": 0.03243367463373161,
+      "network_addon": 0.009730102390119483,
+      "total_margin": 0.042163777023851094,
+      "explanation": "Higher margin due to systemic importance (network score: 1.00)"
+    },
+    {
+      "bank_name": "2025 (Aug 1)",
+      "base_margin": 0.037413560351175525,
+      "network_addon": 0.011224068105352657,
+      "total_margin": 0.04863762845652818,
+      "explanation": "Higher margin due to systemic importance (network score: 1.00)"
+    },
+    {
+      "bank_name": "2025 (Aug 2)",
+      "base_margin": 0.02,
+      "network_addon": 0.006,
+      "total_margin": 0.026000000000000002,
+      "explanation": "Higher margin due to systemic importance (network score: 1.00)"
+    },
+    {
+      "bank_name": "2025 (Aug 3)",
+      "base_margin": 0.04674634850483588,
+      "network_addon": 0.014023904551450764,
+      "total_margin": 0.060770253056286645,
+      "explanation": "High margin due to elevated default probability (66.9%)"
+    },
+    {
+      "bank_name": "2025 (Aug 4)",
+      "base_margin": 0.03166328872302673,
+      "network_addon": 0.005882386747542725,
+      "total_margin": 0.03754567547056945,
+      "explanation": "Higher margin due to systemic importance (network score: 0.62)"
+    },
+    {
+      "bank_name": "2024",
+      "base_margin": 0.04663693628379643,
+      "network_addon": 0.012047888232985905,
+      "total_margin": 0.058684824516782336,
+      "explanation": "High margin due to elevated default probability (66.6%)"
+    },
+    {
+      "bank_name": "2024 (Aug 0)",
+      "base_margin": 0.04800846131635704,
+      "network_addon": 0.007501878999876054,
+      "total_margin": 0.055510340316233094,
+      "explanation": "High margin due to elevated default probability (70.0%)"
+    },
+    {
+      "bank_name": "2024 (Aug 1)",
+      "base_margin": 0.052043355387109524,
+      "network_addon": 0.014499864526283171,
+      "total_margin": 0.0665432199133927,
+      "explanation": "High margin due to elevated default probability (80.1%)"
+    },
+    {
+      "bank_name": "2024 (Aug 2)",
+      "base_margin": 0.049305853625047906,
+      "network_addon": 0.010824007534213234,
+      "total_margin": 0.06012986115926114,
+      "explanation": "High margin due to elevated default probability (73.3%)"
+    },
+    {
+      "bank_name": "2024 (Aug 3)",
+      "base_margin": 0.054842214451568526,
+      "network_addon": 0.002790439676258592,
+      "total_margin": 0.057632654127827115,
+      "explanation": "High margin due to elevated default probability (87.1%)"
+    },
+    {
+      "bank_name": "2024 (Aug 4)",
+      "base_margin": 0.05348400792087667,
+      "network_addon": 0.0018495884744715745,
+      "total_margin": 0.05533359639534824,
+      "explanation": "High margin due to elevated default probability (83.7%)"
+    },
+    {
+      "bank_name": "2023",
+      "base_margin": 0.04598935196021136,
+      "network_addon": 0.007066460358295464,
+      "total_margin": 0.053055812318506826,
+      "explanation": "High margin due to elevated default probability (65.0%)"
+    },
+    {
+      "bank_name": "2023 (Aug 0)",
+      "base_margin": 0.03922303242206361,
+      "network_addon": -0.0106394088166697,
+      "total_margin": 0.02858362360539391,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2023 (Aug 1)",
+      "base_margin": 0.03691523233639626,
+      "network_addon": 0.011074569700918876,
+      "total_margin": 0.047989802037315135,
+      "explanation": "Higher margin due to systemic importance (network score: 1.00)"
+    },
+    {
+      "bank_name": "2023 (Aug 2)",
+      "base_margin": 0.046104688105352454,
+      "network_addon": 0.0048415703713154835,
+      "total_margin": 0.050946258476667935,
+      "explanation": "High margin due to elevated default probability (65.3%)"
+    },
+    {
+      "bank_name": "2023 (Aug 3)",
+      "base_margin": 0.05032392871740405,
+      "network_addon": 0.008699655867693881,
+      "total_margin": 0.05902358458509793,
+      "explanation": "High margin due to elevated default probability (75.8%)"
+    },
+    {
+      "bank_name": "2023 (Aug 4)",
+      "base_margin": 0.06,
+      "network_addon": 0.018,
+      "total_margin": 0.078,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2022",
+      "base_margin": 0.03066277667785687,
+      "network_addon": 0.0023500208655465116,
+      "total_margin": 0.03301279754340338,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2022 (Aug 0)",
+      "base_margin": 0.03798228677723376,
+      "network_addon": -0.0010799778313276857,
+      "total_margin": 0.03690230894590608,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2022 (Aug 1)",
+      "base_margin": 0.029288436117646678,
+      "network_addon": 0.007871510247288835,
+      "total_margin": 0.03715994636493551,
+      "explanation": "Higher margin due to systemic importance (network score: 0.90)"
+    },
+    {
+      "bank_name": "2022 (Aug 2)",
+      "base_margin": 0.02,
+      "network_addon": -0.0024959178371482724,
+      "total_margin": 0.01750408216285173,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2022 (Aug 3)",
+      "base_margin": 0.04964346059660781,
+      "network_addon": 0.013593363454314037,
+      "total_margin": 0.06323682405092185,
+      "explanation": "High margin due to elevated default probability (74.1%)"
+    },
+    {
+      "bank_name": "2022 (Aug 4)",
+      "base_margin": 0.040105947123826445,
+      "network_addon": -9.436661138557691e-05,
+      "total_margin": 0.040011580512440865,
+      "explanation": "High margin due to elevated default probability (50.3%)"
+    },
+    {
+      "bank_name": "2021",
+      "base_margin": 0.04153638410427904,
+      "network_addon": 1.7340713730651813e-05,
+      "total_margin": 0.04155372481800969,
+      "explanation": "High margin due to elevated default probability (53.8%)"
+    },
+    {
+      "bank_name": "2021 (Aug 0)",
+      "base_margin": 0.058825179679130736,
+      "network_addon": -0.002014484034090696,
+      "total_margin": 0.056810695645040044,
+      "explanation": "High margin due to elevated default probability (97.1%)"
+    },
+    {
+      "bank_name": "2021 (Aug 1)",
+      "base_margin": 0.02,
+      "network_addon": -0.0037971556453831184,
+      "total_margin": 0.016202844354616882,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2021 (Aug 2)",
+      "base_margin": 0.0464121153574831,
+      "network_addon": 0.008062999131651557,
+      "total_margin": 0.05447511448913466,
+      "explanation": "High margin due to elevated default probability (66.0%)"
+    },
+    {
+      "bank_name": "2021 (Aug 3)",
+      "base_margin": 0.03406731861746324,
+      "network_addon": -0.007973584144782258,
+      "total_margin": 0.02609373447268098,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2021 (Aug 4)",
+      "base_margin": 0.03526144864818684,
+      "network_addon": -0.00275276894278957,
+      "total_margin": 0.03250867970539727,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2020",
+      "base_margin": 0.02,
+      "network_addon": -0.0003648618762010819,
+      "total_margin": 0.01963513812379892,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2020 (Aug 0)",
+      "base_margin": 0.02,
+      "network_addon": -0.0020737179498012312,
+      "total_margin": 0.01792628205019877,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2020 (Aug 1)",
+      "base_margin": 0.02,
+      "network_addon": -0.004396111283026454,
+      "total_margin": 0.015603888716973546,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2020 (Aug 2)",
+      "base_margin": 0.02,
+      "network_addon": -0.002314421420551502,
+      "total_margin": 0.017685578579448497,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2020 (Aug 3)",
+      "base_margin": 0.02,
+      "network_addon": 0.0002135284546155902,
+      "total_margin": 0.02021352845461559,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2020 (Aug 4)",
+      "base_margin": 0.02,
+      "network_addon": 0.006,
+      "total_margin": 0.026000000000000002,
+      "explanation": "Higher margin due to systemic importance (network score: 1.00)"
+    },
+    {
+      "bank_name": "2019",
+      "base_margin": 0.02,
+      "network_addon": -0.0001093212133604537,
+      "total_margin": 0.019890678786639547,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2019 (Aug 0)",
+      "base_margin": 0.06,
+      "network_addon": -0.006237007758075546,
+      "total_margin": 0.05376299224192445,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2019 (Aug 1)",
+      "base_margin": 0.02,
+      "network_addon": 0.006,
+      "total_margin": 0.026000000000000002,
+      "explanation": "Higher margin due to systemic importance (network score: 1.00)"
+    },
+    {
+      "bank_name": "2019 (Aug 2)",
+      "base_margin": 0.02,
+      "network_addon": -0.002436963430462175,
+      "total_margin": 0.017563036569537824,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2019 (Aug 3)",
+      "base_margin": 0.02,
+      "network_addon": -0.0015826588539208219,
+      "total_margin": 0.01841734114607918,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2019 (Aug 4)",
+      "base_margin": 0.02,
+      "network_addon": 0.006,
+      "total_margin": 0.026000000000000002,
+      "explanation": "Higher margin due to systemic importance (network score: 1.00)"
+    },
+    {
+      "bank_name": "2018",
+      "base_margin": 0.06,
+      "network_addon": -0.0005234395841446465,
+      "total_margin": 0.05947656041585535,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2018 (Aug 0)",
+      "base_margin": 0.06,
+      "network_addon": 0.00384736514455325,
+      "total_margin": 0.06384736514455325,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2018 (Aug 1)",
+      "base_margin": 0.06,
+      "network_addon": -0.013783014844063999,
+      "total_margin": 0.046216985155936,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2018 (Aug 2)",
+      "base_margin": 0.06,
+      "network_addon": -0.0055844065043283795,
+      "total_margin": 0.05441559349567162,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2018 (Aug 3)",
+      "base_margin": 0.06,
+      "network_addon": -0.00524612978826737,
+      "total_margin": 0.05475387021173263,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2018 (Aug 4)",
+      "base_margin": 0.05255581662022708,
+      "network_addon": -0.011864809780258749,
+      "total_margin": 0.04069100683996833,
+      "explanation": "High margin due to elevated default probability (81.4%)"
+    },
+    {
+      "bank_name": "2017",
+      "base_margin": 0.06,
+      "network_addon": -0.003862454192557462,
+      "total_margin": 0.056137545807442533,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2017 (Aug 0)",
+      "base_margin": 0.06,
+      "network_addon": -0.02680825048897067,
+      "total_margin": 0.03319174951102932,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2017 (Aug 1)",
+      "base_margin": 0.06,
+      "network_addon": -0.0019642620909973802,
+      "total_margin": 0.05803573790900262,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2017 (Aug 2)",
+      "base_margin": 0.06,
+      "network_addon": -0.0182554795885741,
+      "total_margin": 0.0417445204114259,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2017 (Aug 3)",
+      "base_margin": 0.06,
+      "network_addon": -0.0005308606516185667,
+      "total_margin": 0.05946913934838143,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2017 (Aug 4)",
+      "base_margin": 0.06,
+      "network_addon": -0.004237377525840976,
+      "total_margin": 0.05576262247415902,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2016",
+      "base_margin": 0.05603505250909234,
+      "network_addon": -0.00572981214050046,
+      "total_margin": 0.05030524036859188,
+      "explanation": "High margin due to elevated default probability (90.1%)"
+    },
+    {
+      "bank_name": "2016 (Aug 0)",
+      "base_margin": 0.057346273841180295,
+      "network_addon": -0.002132509889147184,
+      "total_margin": 0.05521376395203311,
+      "explanation": "High margin due to elevated default probability (93.4%)"
+    },
+    {
+      "bank_name": "2016 (Aug 1)",
+      "base_margin": 0.02482097478791527,
+      "network_addon": -0.008111418350133898,
+      "total_margin": 0.016709556437781374,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2016 (Aug 2)",
+      "base_margin": 0.05580237798946138,
+      "network_addon": -0.009256023928004028,
+      "total_margin": 0.04654635406145735,
+      "explanation": "High margin due to elevated default probability (89.5%)"
+    },
+    {
+      "bank_name": "2016 (Aug 3)",
+      "base_margin": 0.05920798551931514,
+      "network_addon": -0.020583103402426788,
+      "total_margin": 0.038624882116888345,
+      "explanation": "High margin due to elevated default probability (98.0%)"
+    },
+    {
+      "bank_name": "2016 (Aug 4)",
+      "base_margin": 0.06,
+      "network_addon": -0.007050784541583908,
+      "total_margin": 0.05294921545841609,
+      "explanation": "High margin due to elevated default probability (100.0%)"
+    },
+    {
+      "bank_name": "2015",
+      "base_margin": 0.027200488747605025,
+      "network_addon": -0.004361153547005905,
+      "total_margin": 0.02283933520059912,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2015 (Aug 0)",
+      "base_margin": 0.02,
+      "network_addon": -0.004951923098766506,
+      "total_margin": 0.015048076901233495,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2015 (Aug 1)",
+      "base_margin": 0.02,
+      "network_addon": -0.0022903223340206523,
+      "total_margin": 0.017709677665979348,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2015 (Aug 2)",
+      "base_margin": 0.03284734976977332,
+      "network_addon": -0.005264010691180745,
+      "total_margin": 0.027583339078592575,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2015 (Aug 3)",
+      "base_margin": 0.05166214651705985,
+      "network_addon": 0.0027037315408494577,
+      "total_margin": 0.05436587805790931,
+      "explanation": "High margin due to elevated default probability (79.2%)"
+    },
+    {
+      "bank_name": "2015 (Aug 4)",
+      "base_margin": 0.03975513332522025,
+      "network_addon": -0.00010937035186260343,
+      "total_margin": 0.039645762973357646,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2014",
+      "base_margin": 0.03008052153091825,
+      "network_addon": -0.006779772299083534,
+      "total_margin": 0.023300749231834714,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2014 (Aug 0)",
+      "base_margin": 0.02,
+      "network_addon": -0.007511377945875779,
+      "total_margin": 0.01248862205412422,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2014 (Aug 1)",
+      "base_margin": 0.03267442748030543,
+      "network_addon": -0.00364436918434085,
+      "total_margin": 0.029030058295964584,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2014 (Aug 2)",
+      "base_margin": 0.023253731012262656,
+      "network_addon": -0.014249556758298953,
+      "total_margin": 0.009004174253963703,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2014 (Aug 3)",
+      "base_margin": 0.02758405024921526,
+      "network_addon": -0.004755343438084413,
+      "total_margin": 0.022828706811130847,
+      "explanation": "Standard margin requirements"
+    },
+    {
+      "bank_name": "2014 (Aug 4)",
+      "base_margin": 0.03091901574467932,
+      "network_addon": -0.008845384133286076,
+      "total_margin": 0.022073631611393245,
+      "explanation": "Standard margin requirements"
+    }
+  ],
+  "default_fund": [
+    {
+      "bank_name": "2023 (Aug 4)",
+      "contribution": 617033.4910336543,
+      "share": 0.0823085830478427
+    },
+    {
+      "bank_name": "2025 (Aug 3)",
+      "contribution": 409294.63262381323,
+      "share": 0.054753104166007024
+    },
+    {
+      "bank_name": "2017 (Aug 3)",
+      "contribution": 318938.7418724538,
+      "share": 0.05297283597872317
+    },
+    {
+      "bank_name": "2024 (Aug 4)",
+      "contribution": 247697.8428170753,
+      "share": 0.04208795460325149
+    },
+    {
+      "bank_name": "2025 (Aug 1)",
+      "contribution": 343129.13479348074,
+      "share": 0.041872559863617986
+    },
+    {
+      "bank_name": "2024",
+      "contribution": 259339.7271930434,
+      "share": 0.040448670323004914
+    },
+    {
+      "bank_name": "2016 (Aug 2)",
+      "contribution": 213321.94108368192,
+      "share": 0.038605314256137044
+    },
+    {
+      "bank_name": "2021 (Aug 0)",
+      "contribution": 179803.51071643806,
+      "share": 0.03483604287160983
+    },
+    {
+      "bank_name": "2018",
+      "contribution": 172050.10539268164,
+      "share": 0.033969705716364325
+    },
+    {
+      "bank_name": "2018 (Aug 2)",
+      "contribution": 169853.4180293548,
+      "share": 0.03364462528294788
+    },
+    {
+      "bank_name": "2023",
+      "contribution": 192086.34204654678,
+      "share": 0.032647311298748746
+    },
+    {
+      "bank_name": "2023 (Aug 3)",
+      "contribution": 169576.5091316416,
+      "share": 0.031236752859545625
+    },
+    {
+      "bank_name": "2024 (Aug 0)",
+      "contribution": 163809.3871100506,
+      "share": 0.029800275278045255
+    },
+    {
+      "bank_name": "2025",
+      "contribution": 203061.04921406735,
+      "share": 0.02936813249825825
+    },
+    {
+      "bank_name": "2017",
+      "contribution": 135827.67947582403,
+      "share": 0.028391082636441814
+    },
+    {
+      "bank_name": "2022 (Aug 3)",
+      "contribution": 149475.18254646016,
+      "share": 0.02831898997131324
+    },
+    {
+      "bank_name": "2024 (Aug 2)",
+      "contribution": 146171.50367066188,
+      "share": 0.027773607927640775
+    },
+    {
+      "bank_name": "2021 (Aug 2)",
+      "contribution": 150986.32997767668,
+      "share": 0.027643205405768353
+    },
+    {
+      "bank_name": "2024 (Aug 3)",
+      "contribution": 124622.74157434123,
+      "share": 0.025736387427040562
+    },
+    {
+      "bank_name": "2024 (Aug 1)",
+      "contribution": 127896.64954321319,
+      "share": 0.025726152435769915
+    },
+    {
+      "bank_name": "2025 (Aug 0)",
+      "contribution": 186544.56009176228,
+      "share": 0.025130490793526337
+    },
+    {
+      "bank_name": "2019 (Aug 0)",
+      "contribution": 110263.88891393864,
+      "share": 0.02412904703755696
+    },
+    {
+      "bank_name": "2018 (Aug 1)",
+      "contribution": 109378.107382725,
+      "share": 0.023975688829783463
+    },
+    {
+      "bank_name": "2025 (Aug 4)",
+      "contribution": 176377.33753432025,
+      "share": 0.023694256376510545
+    },
+    {
+      "bank_name": "2018 (Aug 0)",
+      "contribution": 107489.28647587275,
+      "share": 0.023647293246785408
+    },
+    {
+      "bank_name": "2017 (Aug 1)",
+      "contribution": 100157.58850250261,
+      "share": 0.022354246225958763
+    },
+    {
+      "bank_name": "2023 (Aug 1)",
+      "contribution": 133185.15160341177,
+      "share": 0.022206342201951345
+    },
+    {
+      "bank_name": "2016",
+      "contribution": 101765.65267987744,
+      "share": 0.022156010617221094
+    },
+    {
+      "bank_name": "2022 (Aug 4)",
+      "contribution": 109146.55963362707,
+      "share": 0.02027011263530124
+    },
+    {
+      "bank_name": "2021",
+      "contribution": 95998.24971804746,
+      "share": 0.018783004287324687
+    },
+    {
+      "bank_name": "2015 (Aug 4)",
+      "contribution": 86756.90945779781,
+      "share": 0.017039397239775583
+    },
+    {
+      "bank_name": "2023 (Aug 0)",
+      "contribution": 83965.25185233535,
+      "share": 0.01651374890470059
+    },
+    {
+      "bank_name": "2015 (Aug 3)",
+      "contribution": 70507.11987786852,
+      "share": 0.016100580544055696
+    },
+    {
+      "bank_name": "2022 (Aug 1)",
+      "contribution": 94437.24084601618,
+      "share": 0.014523589822489595
+    },
+    {
+      "bank_name": "2022",
+      "contribution": 62297.01200510308,
+      "share": 0.011336410528614565
+    },
+    {
+      "bank_name": "2021 (Aug 3)",
+      "contribution": 38150.669700805556,
+      "share": 0.008377027344962087
+    },
+    {
+      "bank_name": "2015 (Aug 2)",
+      "contribution": 31676.97783495938,
+      "share": 0.0070918240061663695
+    },
+    {
+      "bank_name": "2017 (Aug 4)",
+      "contribution": 26085.335264637208,
+      "share": 0.007031758112551733
+    },
+    {
+      "bank_name": "2018 (Aug 3)",
+      "contribution": 25497.350612348444,
+      "share": 0.00688679503310788
+    },
+    {
+      "bank_name": "2016 (Aug 0)",
+      "contribution": 24330.329380984833,
+      "share": 0.006559238257107135
+    },
+    {
+      "bank_name": "2023 (Aug 2)",
+      "contribution": 21616.98105574994,
+      "share": 0.0056961889858835645
+    },
+    {
+      "bank_name": "2021 (Aug 4)",
+      "contribution": 18986.882687321682,
+      "share": 0.004765488731592334
+    },
+    {
+      "bank_name": "2014 (Aug 1)",
+      "contribution": 18898.80857309597,
+      "share": 0.004621196750984487
+    },
+    {
+      "bank_name": "2015",
+      "contribution": 14531.106535541385,
+      "share": 0.0033791340935617202
+    },
+    {
+      "bank_name": "2014",
+      "contribution": 12263.171367195138,
+      "share": 0.003087264337979117
+    },
+    {
+      "bank_name": "2016 (Aug 1)",
+      "contribution": 11572.416638749764,
+      "share": 0.002604603854799748
+    },
+    {
+      "bank_name": "2022 (Aug 0)",
+      "contribution": 3066.6814384374147,
+      "share": 0.0008875502105037154
+    },
+    {
+      "bank_name": "2014 (Aug 4)",
+      "contribution": 148.11293035237347,
+      "share": 4.4028622575060216e-05
+    },
+    {
+      "bank_name": "2025 (Aug 2)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2022 (Aug 2)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2021 (Aug 1)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2020",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2020 (Aug 0)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2020 (Aug 1)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2020 (Aug 2)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2020 (Aug 3)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2020 (Aug 4)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2019",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2019 (Aug 1)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2019 (Aug 2)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2019 (Aug 3)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2019 (Aug 4)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2015 (Aug 0)",
+      "contribution": 0.0,
+      "share": 0.0
+    },
+    {
+      "bank_name": "2015 (Aug 1)",
+      "contribution": 0.0,
+      "share": -0.0
+    },
+    {
+      "bank_name": "2014 (Aug 0)",
+      "contribution": 0.0,
+      "share": -0.0
+    },
+    {
+      "bank_name": "2014 (Aug 3)",
+      "contribution": -1900.938038277246,
+      "share": -0.0005943785516578478
+    },
+    {
+      "bank_name": "2014 (Aug 2)",
+      "contribution": -2969.814734326058,
+      "share": -0.0011134122846299984
+    },
+    {
+      "bank_name": "2016 (Aug 4)",
+      "contribution": -15867.535132533174,
+      "share": -0.005121439304692453
+    },
+    {
+      "bank_name": "2017 (Aug 0)",
+      "contribution": -16689.30789613847,
+      "share": -0.005412230967344039
+    },
+    {
+      "bank_name": "2016 (Aug 3)",
+      "contribution": -54190.684612561476,
+      "share": -0.02908614106619433
+    },
+    {
+      "bank_name": "2018 (Aug 4)",
+      "contribution": -45210.64777317309,
+      "share": -0.02949406538271175
+    },
+    {
+      "bank_name": "2017 (Aug 2)",
+      "contribution": -55929.852172426705,
+      "share": -0.03421194392417937
+    }
+  ],
+  "spectral": {
+    "spectral_radius": 0.0,
+    "fiedler_value": 0.0,
+    "spectral_gap": 0.0,
+    "eigenvalue_entropy": 0.0,
+    "effective_rank": 0.0,
+    "contagion_index": 0.3,
+    "n_nodes": 72
+  }
+}
