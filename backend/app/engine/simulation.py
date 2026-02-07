@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Set, Tuple
 from uuid import UUID
+import logging
 
 import networkx as nx
 import numpy as np
@@ -31,6 +32,8 @@ from app.engine.contagion import (
 )
 from app.engine.bayesian import BayesianBeliefUpdater, SignalProcessor
 from app.engine.network import NetworkAnalyzer
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -87,16 +90,19 @@ class SimulationEngine:
         network: nx.DiGraph,
         convergence_threshold: float = 1e-6,
         max_timesteps: int = 100,
+        enable_ml: bool = False,
     ):
         """
         Args:
             network: Financial network graph
             convergence_threshold: Threshold for early stopping
             max_timesteps: Maximum simulation timesteps
+            enable_ml: Whether to use ML predictions
         """
         self.network = network
         self.convergence_threshold = convergence_threshold
         self.max_timesteps = max_timesteps
+        self.enable_ml = enable_ml
         
         # Initialize sub-engines
         self.nash_solver = NashEquilibriumSolver(tolerance=convergence_threshold)
@@ -108,6 +114,26 @@ class SimulationEngine:
         # Payoff tracking
         self.payoff_history: Dict[UUID, List[PayoffComponents]] = {}
         self.payoff_matrices: List[Dict] = []
+        
+        # Initialize ML predictor if enabled
+        self.ml_predictor = None
+        if enable_ml:
+            try:
+                from app.ml.inference.predictor import DefaultPredictor
+                from app.ml.features.extractor import FeatureExtractor
+                from app.ml.config import ml_config
+                from pathlib import Path
+                
+                model_path = ml_config.ML_MODELS_PATH / "default_predictor" / "best_model.pt"
+                feature_extractor = FeatureExtractor(network_analyzer=self.network_analyzer)
+                self.ml_predictor = DefaultPredictor(
+                    model_path=model_path,
+                    feature_extractor=feature_extractor,
+                )
+                logger.info("ML predictor initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize ML predictor: {e}. Using fallback.")
+                self.ml_predictor = None
     
     def run_simulation(
         self,
@@ -156,6 +182,10 @@ class SimulationEngine:
                     shock = self._get_shock(shocks, shock_id)
                     if shock:
                         current_states = self._apply_shock(current_states, shock)
+            
+            # 1.5. Update default probabilities with ML predictions (if enabled)
+            if self.enable_ml and self.ml_predictor:
+                current_states = self._update_ml_predictions(current_states, all_defaults)
             
             # 2. Agent decision phase
             decisions = self._agent_decision_phase(current_states, t)
@@ -479,6 +509,60 @@ class SimulationEngine:
                 state.default_probability = 1.0
         
         return new_states
+    
+    def _update_ml_predictions(
+        self,
+        states: Dict[UUID, AgentState],
+        defaulted_institutions: Set[UUID],
+    ) -> Dict[UUID, AgentState]:
+        """
+        Update default probabilities using ML predictions
+        
+        Args:
+            states: Current agent states
+            defaulted_institutions: Set of defaulted institutions
+        
+        Returns:
+            Updated states with ML predictions
+        """
+        if not self.ml_predictor:
+            return states
+        
+        try:
+            # Batch prediction for all non-defaulted institutions
+            non_defaulted_states = {
+                inst_id: state for inst_id, state in states.items()
+                if inst_id not in defaulted_institutions
+            }
+            
+            if not non_defaulted_states:
+                return states
+            
+            # Get ML predictions
+            predictions = self.ml_predictor.predict_batch(
+                agent_states=non_defaulted_states,
+                network=self.network,
+                defaulted_institutions=defaulted_institutions,
+            )
+            
+            # Update states with ML predictions
+            updated_states = states.copy()
+            for inst_id, prediction in predictions.items():
+                if self.ml_predictor.should_use_ml_prediction(prediction):
+                    # Use ML prediction
+                    updated_states[inst_id].default_probability = prediction.probability
+                    updated_states[inst_id].ml_prediction_confidence = prediction.confidence
+                    updated_states[inst_id].ml_model_version = prediction.model_version
+                else:
+                    # Keep prior/bayesian prediction
+                    updated_states[inst_id].ml_prediction_confidence = prediction.confidence
+                    updated_states[inst_id].ml_model_version = f"{prediction.model_version}_low_conf"
+            
+            return updated_states
+            
+        except Exception as e:
+            logger.error(f"Failed to update ML predictions: {e}")
+            return states
     
     def _update_beliefs(
         self,

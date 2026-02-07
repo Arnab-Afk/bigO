@@ -1,0 +1,290 @@
+[
+  {
+    "bank_name": "2025",
+    "default_probability": 0.415188070038499
+  },
+  {
+    "bank_name": "2025 (Aug 0)",
+    "default_probability": 0.3108418658432904
+  },
+  {
+    "bank_name": "2025 (Aug 1)",
+    "default_probability": 0.43533900877938797
+  },
+  {
+    "bank_name": "2025 (Aug 2)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2025 (Aug 3)",
+    "default_probability": 0.6686587126208969
+  },
+  {
+    "bank_name": "2025 (Aug 4)",
+    "default_probability": 0.2915822180756682
+  },
+  {
+    "bank_name": "2024",
+    "default_probability": 0.6659234070949107
+  },
+  {
+    "bank_name": "2024 (Aug 0)",
+    "default_probability": 0.700211532908926
+  },
+  {
+    "bank_name": "2024 (Aug 1)",
+    "default_probability": 0.8010838846777382
+  },
+  {
+    "bank_name": "2024 (Aug 2)",
+    "default_probability": 0.7326463406261976
+  },
+  {
+    "bank_name": "2024 (Aug 3)",
+    "default_probability": 0.8710553612892131
+  },
+  {
+    "bank_name": "2024 (Aug 4)",
+    "default_probability": 0.8371001980219166
+  },
+  {
+    "bank_name": "2023",
+    "default_probability": 0.6497337990052839
+  },
+  {
+    "bank_name": "2023 (Aug 0)",
+    "default_probability": 0.4805758105515903
+  },
+  {
+    "bank_name": "2023 (Aug 1)",
+    "default_probability": 0.4228808084099064
+  },
+  {
+    "bank_name": "2023 (Aug 2)",
+    "default_probability": 0.6526172026338112
+  },
+  {
+    "bank_name": "2023 (Aug 3)",
+    "default_probability": 0.7580982179351012
+  },
+  {
+    "bank_name": "2023 (Aug 4)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2022",
+    "default_probability": 0.2665694169464218
+  },
+  {
+    "bank_name": "2022 (Aug 0)",
+    "default_probability": 0.44955716943084395
+  },
+  {
+    "bank_name": "2022 (Aug 1)",
+    "default_probability": 0.23221090294116695
+  },
+  {
+    "bank_name": "2022 (Aug 2)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2022 (Aug 3)",
+    "default_probability": 0.7410865149151953
+  },
+  {
+    "bank_name": "2022 (Aug 4)",
+    "default_probability": 0.5026486780956612
+  },
+  {
+    "bank_name": "2021",
+    "default_probability": 0.538409602606976
+  },
+  {
+    "bank_name": "2021 (Aug 0)",
+    "default_probability": 0.9706294919782683
+  },
+  {
+    "bank_name": "2021 (Aug 1)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2021 (Aug 2)",
+    "default_probability": 0.6603028839370775
+  },
+  {
+    "bank_name": "2021 (Aug 3)",
+    "default_probability": 0.35168296543658095
+  },
+  {
+    "bank_name": "2021 (Aug 4)",
+    "default_probability": 0.3815362162046709
+  },
+  {
+    "bank_name": "2020",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2020 (Aug 0)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2020 (Aug 1)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2020 (Aug 2)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2020 (Aug 3)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2020 (Aug 4)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2019",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2019 (Aug 0)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2019 (Aug 1)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2019 (Aug 2)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2019 (Aug 3)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2019 (Aug 4)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2018",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2018 (Aug 0)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2018 (Aug 1)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2018 (Aug 2)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2018 (Aug 3)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2018 (Aug 4)",
+    "default_probability": 0.8138954155056771
+  },
+  {
+    "bank_name": "2017",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2017 (Aug 0)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2017 (Aug 1)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2017 (Aug 2)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2017 (Aug 3)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2017 (Aug 4)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2016",
+    "default_probability": 0.9008763127273085
+  },
+  {
+    "bank_name": "2016 (Aug 0)",
+    "default_probability": 0.9336568460295074
+  },
+  {
+    "bank_name": "2016 (Aug 1)",
+    "default_probability": 0.12052436969788172
+  },
+  {
+    "bank_name": "2016 (Aug 2)",
+    "default_probability": 0.8950594497365344
+  },
+  {
+    "bank_name": "2016 (Aug 3)",
+    "default_probability": 0.9801996379828783
+  },
+  {
+    "bank_name": "2016 (Aug 4)",
+    "default_probability": 1.0
+  },
+  {
+    "bank_name": "2015",
+    "default_probability": 0.18001221869012557
+  },
+  {
+    "bank_name": "2015 (Aug 0)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2015 (Aug 1)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2015 (Aug 2)",
+    "default_probability": 0.32118374424433305
+  },
+  {
+    "bank_name": "2015 (Aug 3)",
+    "default_probability": 0.7915536629264964
+  },
+  {
+    "bank_name": "2015 (Aug 4)",
+    "default_probability": 0.4938783331305062
+  },
+  {
+    "bank_name": "2014",
+    "default_probability": 0.2520130382729562
+  },
+  {
+    "bank_name": "2014 (Aug 0)",
+    "default_probability": 0.0
+  },
+  {
+    "bank_name": "2014 (Aug 1)",
+    "default_probability": 0.3168606870076358
+  },
+  {
+    "bank_name": "2014 (Aug 2)",
+    "default_probability": 0.08134327530656643
+  },
+  {
+    "bank_name": "2014 (Aug 3)",
+    "default_probability": 0.18960125623038143
+  },
+  {
+    "bank_name": "2014 (Aug 4)",
+    "default_probability": 0.27297539361698303
+  }
+]
