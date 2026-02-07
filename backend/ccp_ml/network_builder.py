@@ -58,7 +58,7 @@ class NetworkBuilder:
         sector_weight: float = 0.3,
         liquidity_weight: float = 0.4,
         market_weight: float = 0.3,
-        edge_threshold: float = 0.3
+        edge_threshold: float = 0.1  # Lowered from 0.3 to create more edges
     ):
         """
         Initialize network builder.
