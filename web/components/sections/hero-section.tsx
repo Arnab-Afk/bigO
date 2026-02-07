@@ -204,10 +204,8 @@ export function HeroSection() {
         className="pointer-events-none fixed bottom-0 left-0 right-0 z-10 px-6 pb-12 md:px-12 md:pb-16 lg:px-20 lg:pb-20"
         style={{ opacity: textOpacity }}
       >
-        <p className="mx-auto max-w-2xl text-center text-2xl leading-relaxed text-white md:text-3xl lg:text-[2.5rem] lg:leading-snug">
-          
-          <br />
-          and adventure-ready.
+        <p className="mx-auto max-w-2xl text-center text-2xl leading-relaxed text-black-400 md:text-3xl lg:text-[2.5rem] lg:leading-snug">
+          Resilient Unified Decision & Risk Analytics
         </p>
       </div>
 
