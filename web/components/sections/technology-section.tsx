@@ -89,7 +89,7 @@ export function TechnologySection() {
   const [scrollProgress, setScrollProgress] = useState(0);
   const [textProgress, setTextProgress] = useState(0);
   
-  const descriptionText = "Rudra models financial institutions as strategic agents in a dynamic network. By simulating how local decisions propagate through credit exposures, settlement dependencies, and liquidity flows, we identify systemic vulnerabilities before they materialize. Our game-theoretic engine captures realistic strategic uncertainty and incomplete information, enabling predictive analysis of cascading failures and contagion paths across the financial system.";
+  const descriptionText = "RUDRA models financial institutions as strategic agents in a dynamic network. By simulating how local decisions propagate through credit exposures, settlement dependencies, and liquidity flows, we identify systemic vulnerabilities before they materialize. Our game-theoretic engine captures realistic strategic uncertainty and incomplete information, enabling predictive analysis of cascading failures and contagion paths across the financial system.";
 
   useEffect(() => {
     const handleScroll = () => {

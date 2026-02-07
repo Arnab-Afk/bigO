@@ -4,9 +4,9 @@ import Image from "next/image";
 import { useEffect, useRef, useState, useCallback } from "react";
 
 const titles = [
-  "Strategic Intelligence.",
-  "Network-Aware Analysis.",
-  "Predictive Resilience.",
+  "Systemic Risk Intelligence.",
+  "Network Contagion Modeling.",
+  "Predictive Analytics.",
 ];
 
 export function PhilosophySection() {
@@ -145,7 +145,7 @@ export function PhilosophySection() {
         <div className="text-center">
           
           <p className="mt-8 leading-relaxed text-muted-foreground text-3xl text-center">
-            {("A design home that combines contemporary aesthetics and energy performance. Built with eco-friendly materials, it minimizes carbon footprint while offering optimal comfort.").split(" ").map((word, index, array) => {
+            {("Advanced financial risk analytics platform leveraging game theory, Bayesian networks, and network contagion models. RUDRA provides real-time systemic risk assessment and strategic decision support for financial institutions.").split(" ").map((word, index, array) => {
               const wordProgress = Math.max(0, Math.min(1, (descriptionProgress * array.length) - index));
               const opacity = wordProgress;
               const blur = (1 - wordProgress) * 40;
