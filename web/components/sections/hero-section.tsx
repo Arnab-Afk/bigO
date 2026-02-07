@@ -127,7 +127,7 @@ export function HeroSection() {
             >
               {/* Bottom Layer - Base Image */}
               <Image
-                src="/images/hero-mono.jpg"
+                src="/images/1.png"
                 alt="Modern architectural structure with reflection"
                 fill
                 className="absolute inset-0 z-0 object-cover"
@@ -158,10 +158,11 @@ export function HeroSection() {
               
               {/* Top Layer - Overlay Image */}
               <Image
-                src="/images/hero-mono-overlay.png"
+                src="/images/2.png"
                 alt="Overlay texture"
                 fill
-                className="absolute inset-0 z-20 object-cover"
+                className="absolute inset-0 z-20 object-cover mix-blend-multiply"
+                style={{ opacity: 1 }}
               />
             </div>
 
@@ -204,7 +205,7 @@ export function HeroSection() {
         style={{ opacity: textOpacity }}
       >
         <p className="mx-auto max-w-2xl text-center text-2xl leading-relaxed text-white md:text-3xl lg:text-[2.5rem] lg:leading-snug">
-          Lightweight, durable
+          
           <br />
           and adventure-ready.
         </p>
