@@ -19,6 +19,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.ml.data.real_data_loader import RealDataLoader
+from app.ml.data.synthetic_generator import SyntheticDataGenerator
 from app.ml.training.dataset import InstitutionDataset
 from app.ml.training.trainer import DefaultPredictorTrainer
 from app.ml.models.default_predictor import DefaultPredictorModel
@@ -52,6 +53,11 @@ def inspect_data(csv_path: str):
         logger.info("  - 'defaulted' column (0 or 1)")
         return False
     
+    # Check dataset size
+    if len(df) < 100:
+        logger.warning(f"⚠️  Small dataset ({len(df)} samples). Recommended: 500+ samples")
+        logger.warning("   Consider: 1) Getting more data, 2) Using synthetic data generation")
+    
     # Check data quality
     logger.info(f"\nMissing values per column:")
     missing_vals = df.isnull().sum()
@@ -69,6 +75,12 @@ def inspect_data(csv_path: str):
         
         if default_ratio < 0.05 or default_ratio > 0.95:
             logger.warning(f"⚠️  Highly imbalanced dataset (default ratio: {default_ratio:.1%})")
+        
+        # Check minimum samples per class
+        min_class_count = min(default_count, len(df) - default_count)
+        if min_class_count < 10:
+            logger.warning(f"⚠️  Very few samples in minority class ({min_class_count})")
+            logger.warning("   This may cause training issues. Recommended: 20+ per class")
     
     # Show sample
     logger.info(f"\nFirst 3 rows:")
@@ -165,6 +177,14 @@ def main():
         help='Skip data inspection'
     )
     
+    # Data augmentation
+    parser.add_argument(
+        '--augment-synthetic',
+        type=int,
+        default=0,
+        help='Augment with N synthetic samples (useful for small datasets)'
+    )
+    
     args = parser.parse_args()
     
     # Check if file exists
@@ -201,7 +221,28 @@ def main():
         )
     except Exception as e:
         logger.error(f"Failed to load data: {e}")
-        logger.info("\nTroubleshooting:")
+      Augment with synthetic data if requested
+    if args.augment_synthetic > 0:
+        logger.info(f"\n{'=' * 60}")
+        logger.info("AUGMENTING WITH SYNTHETIC DATA")
+        logger.info("=" * 60)
+        logger.info(f"Generating {args.augment_synthetic} synthetic samples...")
+        
+        generator = SyntheticDataGenerator()
+        synthetic_features, synthetic_labels = generator.generate_balanced_dataset(
+            target_samples=args.augment_synthetic,
+            default_ratio=sum(labels) / len(labels),  # Match real data ratio
+        )
+        
+        logger.info(f"✓ Generated {len(synthetic_features)} synthetic samples")
+        
+        # Combine real + synthetic
+        features.extend(synthetic_features)
+        labels.extend(synthetic_labels)
+        
+        logger.info(f"✓ Total dataset: {len(features)} samples (Real: {len(features) - len(synthetic_features)}, Synthetic: {len(synthetic_features)})")
+    
+    #   logger.info("\nTroubleshooting:")
         logger.info("  1. Check column names match: --id-col, --label-col")
         logger.info("  2. Ensure 'defaulted' column has 0/1 values")
         logger.info("  3. Check for missing values in key columns")
@@ -326,6 +367,14 @@ def main():
     logger.info("\n" + "=" * 60)
     logger.info("NEXT STEPS")
     logger.info("=" * 60)
+    
+    # Suggest improvements based on dataset size
+    if len(dataset) < 500:
+        logger.info("\n💡 Dataset Tips (you have a small dataset):")
+        logger.info("   • Add synthetic data: --augment-synthetic 500")
+        logger.info("   • Collect more real data if possible")
+        logger.info("   • Consider using synthetic-only training first\n")
+    
     logger.info("1. Test the model:")
     logger.info("   pytest tests/test_ml/ -v")
     logger.info("\n2. Run inference on new data:")

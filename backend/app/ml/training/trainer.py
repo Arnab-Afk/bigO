@@ -16,8 +16,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, Subset
 from sklearn.metrics import roc_auc_score, precision_recall_curve, f1_score
+from sklearn.model_selection import train_test_split
 
 try:
     import optuna
@@ -106,12 +107,38 @@ class DefaultPredictorTrainer:
         save_dir = save_dir or ml_config.ML_MODELS_PATH / "default_predictor"
         save_dir.mkdir(parents=True, exist_ok=True)
         
-        # Split dataset
-        val_size = int(len(dataset) * validation_split)
-        train_size = len(dataset) - val_size
-        train_dataset, val_dataset = random_split(
-            dataset, [train_size, val_size]
-        )
+        # Split dataset with stratification to ensure both classes in train/val
+        # Get labels for stratification
+        all_labels = [dataset[i][1].item() for i in range(len(dataset))]
+        indices = list(range(len(dataset)))
+        
+        # Check if we have both classes
+        unique_labels = set(all_labels)
+        if len(unique_labels) < 2:
+            logger.warning(
+                f"Dataset has only one class: {unique_labels}. "
+                "Cannot train a binary classifier. Please provide data with both classes."
+            )
+            raise ValueError("Dataset must contain both positive and negative samples")
+        
+        # Stratified split
+        try:
+            train_indices, val_indices = train_test_split(
+                indices,
+                test_size=validation_split,
+                stratify=all_labels,
+                random_state=42
+            )
+            train_dataset = Subset(dataset, train_indices)
+            val_dataset = Subset(dataset, val_indices)
+        except ValueError as e:
+            # Fallback to regular split if stratification fails
+            logger.warning(f"Stratified split failed: {e}. Using random split.")
+            val_size = int(len(dataset) * validation_split)
+            train_size = len(dataset) - val_size
+            train_dataset, val_dataset = random_split(
+                dataset, [train_size, val_size]
+            )
         
         # Create dataloaders
         train_loader = DataLoader(
@@ -131,7 +158,7 @@ class DefaultPredictorTrainer:
         criterion = nn.BCELoss()
         optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=5, verbose=True
+            optimizer, mode='min', factor=0.5, patience=5
         )
         
         logger.info(f"Training on {train_size} samples, validating on {val_size} samples")
@@ -252,15 +279,35 @@ class DefaultPredictorTrainer:
         all_predictions = np.array(all_predictions)
         all_labels = np.array(all_labels)
         
-        auc = roc_auc_score(all_labels, all_predictions)
+        # Check if we have both classes in validation set
+        unique_labels = np.unique(all_labels)
         
-        # F1 score (use optimal threshold)
-        thresholds = np.linspace(0.1, 0.9, 20)
-        f1_scores = [
-            f1_score(all_labels, (all_predictions > t).astype(int))
-            for t in thresholds
-        ]
-        best_f1 = max(f1_scores)
+        if len(unique_labels) < 2:
+            # Only one class present - cannot compute AUC
+            logger.warning(
+                f"Only one class present in validation set: {unique_labels}. "
+                "Metrics may not be reliable. Consider more data or different split."
+            )
+            auc = 0.5  # Random baseline
+            best_f1 = 0.0
+        else:
+            # Compute AUC
+            try:
+                auc = roc_auc_score(all_labels, all_predictions)
+            except ValueError as e:
+                logger.warning(f"Could not compute AUC: {e}")
+                auc = 0.5
+            
+            # F1 score (use optimal threshold)
+            thresholds = np.linspace(0.1, 0.9, 20)
+            f1_scores = []
+            for t in thresholds:
+                try:
+                    f1 = f1_score(all_labels, (all_predictions > t).astype(int), zero_division=0)
+                    f1_scores.append(f1)
+                except:
+                    f1_scores.append(0.0)
+            best_f1 = max(f1_scores) if f1_scores else 0.0
         
         metrics = {
             'auc': auc,
