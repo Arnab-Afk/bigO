@@ -131,6 +131,91 @@ export interface DefaultFund {
   allocation: Record<string, any>;
 }
 
+// Real-time Simulation Types
+export interface RealtimeSimConfig {
+  max_timesteps: number;
+  shock_config?: {
+    type: 'capital' | 'liquidity' | 'stress';
+    magnitude: number;
+    target_banks?: string[];
+  };
+}
+
+export interface SimStepCommand {
+  n_steps: number;
+  shock_config?: {
+    type: 'capital' | 'liquidity' | 'stress';
+    magnitude: number;
+    target_banks?: string[];
+  };
+}
+
+export interface SimulationStep {
+  timestep: number;
+  timestamp: string;
+  bank_states: Array<{
+    bank_name: string;
+    capital_ratio: number;
+    stress_level: number;
+    defaulted: number;
+  }>;
+  network_metrics: {
+    num_nodes: number;
+    num_edges: number;
+    density: number;
+  };
+  spectral_metrics: {
+    spectral_radius: number;
+    fiedler_value: number;
+    contagion_index: number;
+  };
+  risk_distribution: {
+    low: number;
+    medium: number;
+    high: number;
+  };
+  default_count: number;
+  total_stress: number;
+  average_capital_ratio: number;
+}
+
+export interface RealtimeStatus {
+  available: boolean;
+  is_running?: boolean;
+  current_timestep?: number;
+  max_timesteps?: number;
+  history_length?: number;
+  initialized?: boolean;
+}
+
+export interface SimulationHistory {
+  history: SimulationStep[];
+  total_timesteps: number;
+}
+
+// Graph Generation Types
+export interface GraphRequest {
+  graph_type: 'network' | 'risk_distribution' | 'time_series' | 'spectral';
+  format: 'plotly' | 'matplotlib';
+  highlight_nodes?: string[];
+}
+
+export interface GraphResult {
+  type: 'plotly' | 'image';
+  format?: string;
+  data: string;
+  error?: string;
+}
+
+export interface AvailableGraphs {
+  graphs: Array<{
+    type: string;
+    description: string;
+    requires: string[];
+  }>;
+  formats: string[];
+}
+
 // API Client Class
 class CCPMLApiClient {
   private baseURL: string;
@@ -229,6 +314,61 @@ class CCPMLApiClient {
 
   async getDefaultFund() {
     return this.fetch<DefaultFund>('/api/default-fund');
+  }
+
+  // Real-time Simulation
+  async realtimeInit(config: RealtimeSimConfig) {
+    return this.fetch<{ status: string; max_timesteps: number; current_timestep: number; message: string }>(
+      '/api/realtime/init',
+      {
+        method: 'POST',
+        body: JSON.stringify(config),
+      }
+    );
+  }
+
+  async realtimeStep(command: SimStepCommand) {
+    return this.fetch<{
+      status: string;
+      steps_executed: number;
+      current_timestep: number;
+      latest_state: SimulationStep | null;
+    }>('/api/realtime/step', {
+      method: 'POST',
+      body: JSON.stringify(command),
+    });
+  }
+
+  async realtimeStatus() {
+    return this.fetch<RealtimeStatus>('/api/realtime/status');
+  }
+
+  async realtimeHistory() {
+    return this.fetch<SimulationHistory>('/api/realtime/history');
+  }
+
+  async realtimeStop() {
+    return this.fetch<{ status: string; message: string }>('/api/realtime/stop', {
+      method: 'POST',
+    });
+  }
+
+  // Graph Generation
+  async generateGraph(request: GraphRequest) {
+    return this.fetch<GraphResult>('/api/graphs/generate', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async getAvailableGraphs() {
+    return this.fetch<AvailableGraphs>('/api/graphs/available');
+  }
+
+  // WebSocket Connection
+  createWebSocket() {
+    const wsUrl = this.baseURL.replace('http://', 'ws://').replace('https://', 'wss://');
+    return new WebSocket(`${wsUrl}/ws/simulation`);
   }
 }
 

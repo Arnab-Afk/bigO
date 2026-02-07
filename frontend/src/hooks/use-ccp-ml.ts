@@ -7,6 +7,9 @@ import { ccpMLApi } from '@/lib/api/ccp-ml-client';
 import type {
   SimulationConfig,
   StressTestConfig,
+  RealtimeSimConfig,
+  SimStepCommand,
+  GraphRequest,
 } from '@/lib/api/ccp-ml-client';
 
 // Query Keys
@@ -23,6 +26,11 @@ export const ccpMLQueryKeys = {
   spectral: () => [...ccpMLQueryKeys.all, 'spectral'] as const,
   margins: () => [...ccpMLQueryKeys.all, 'margins'] as const,
   defaultFund: () => [...ccpMLQueryKeys.all, 'default-fund'] as const,
+  realtime: () => [...ccpMLQueryKeys.all, 'realtime'] as const,
+  realtimeStatus: () => [...ccpMLQueryKeys.realtime(), 'status'] as const,
+  realtimeHistory: () => [...ccpMLQueryKeys.realtime(), 'history'] as const,
+  graphs: () => [...ccpMLQueryKeys.all, 'graphs'] as const,
+  availableGraphs: () => [...ccpMLQueryKeys.graphs(), 'available'] as const,
 };
 
 // Health & Status
@@ -137,5 +145,69 @@ export function useCCPReinitialize() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ccpMLQueryKeys.all });
     },
+  });
+}
+
+// Real-time Simulation Hooks
+export function useCCPRealtimeStatus() {
+  return useQuery({
+    queryKey: ccpMLQueryKeys.realtimeStatus(),
+    queryFn: () => ccpMLApi.realtimeStatus(),
+    staleTime: 5000, // 5 seconds
+    refetchInterval: 5000, // Auto-refresh every 5s
+  });
+}
+
+export function useCCPRealtimeHistory() {
+  return useQuery({
+    queryKey: ccpMLQueryKeys.realtimeHistory(),
+    queryFn: () => ccpMLApi.realtimeHistory(),
+    staleTime: 10000,
+  });
+}
+
+export function useCCPRealtimeInit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (config: RealtimeSimConfig) => ccpMLApi.realtimeInit(config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ccpMLQueryKeys.realtime() });
+    },
+  });
+}
+
+export function useCCPRealtimeStep() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (command: SimStepCommand) => ccpMLApi.realtimeStep(command),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ccpMLQueryKeys.realtimeHistory() });
+      queryClient.invalidateQueries({ queryKey: ccpMLQueryKeys.realtimeStatus() });
+    },
+  });
+}
+
+export function useCCPRealtimeStop() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => ccpMLApi.realtimeStop(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ccpMLQueryKeys.realtime() });
+    },
+  });
+}
+
+// Graph Generation Hooks
+export function useCCPAvailableGraphs() {
+  return useQuery({
+    queryKey: ccpMLQueryKeys.availableGraphs(),
+    queryFn: () => ccpMLApi.getAvailableGraphs(),
+    staleTime: 300000, // 5 minutes (rarely changes)
+  });
+}
+
+export function useCCPGenerateGraph() {
+  return useMutation({
+    mutationFn: (request: GraphRequest) => ccpMLApi.generateGraph(request),
   });
 }

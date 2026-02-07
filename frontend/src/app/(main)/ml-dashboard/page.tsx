@@ -20,6 +20,11 @@ import {
   useCCPRunSimulation,
   useCCPStressTest,
   useCCPReinitialize,
+  useCCPRealtimeStatus,
+  useCCPRealtimeHistory,
+  useCCPRealtimeInit,
+  useCCPRealtimeStep,
+  useCCPRealtimeStop,
 } from '@/hooks/use-ccp-ml';
 import {
   Play,
@@ -29,6 +34,9 @@ import {
   TrendingUp,
   AlertTriangle,
   Zap,
+  Pause,
+  SkipForward,
+  RotateCcw,
 } from 'lucide-react';
 
 export default function MLDashboardPage() {
@@ -40,14 +48,28 @@ export default function MLDashboardPage() {
   const { data: spectral, isLoading: spectralLoading } = useCCPSpectralAnalysis();
   const { data: margins, isLoading: marginsLoading } = useCCPMargins();
   
+  // Real-time simulation hooks
+  const { data: realtimeStatus } = useCCPRealtimeStatus();
+  const { data: realtimeHistory } = useCCPRealtimeHistory();
+  const { mutate: initRealtime, isPending: isInitializingRealtime } = useCCPRealtimeInit();
+  const { mutate: stepRealtime, isPending: isSteppingRealtime } = useCCPRealtimeStep();
+  const { mutate: stopRealtime } = useCCPRealtimeStop();
+  
   // Mutations
   const { mutate: runSimulation, isPending: isRunningSimulation } = useCCPRunSimulation();
   const { mutate: stressTest, isPending: isRunningStressTest } = useCCPStressTest();
   const { mutate: reinitialize, isPending: isReinitializing } = useCCPReinitialize();
 
-  // Computed values
-  const totalBanks = status?.num_banks || 0;
-  const totalEdges = network?.num_edges || 0;
+  // Ceal-time simulation state
+  const isRealtimeRunning = realtimeStatus?.is_running || false;
+  const currentTimestep = realtimeStatus?.current_timestep || 0;
+  const maxTimesteps = realtimeStatus?.max_timesteps || 100;
+  const isRealtimeInitialized = realtimeStatus?.initialized || false;
+  const latestStep = realtimeHistory?.history?.[realtimeHistory.history.length - 1];
+
+  // Romputed values
+  const totalBanks = status?.n_banks || status?.num_banks || 0;
+  const totalEdges = status?.n_edges || status?.num_edges || 0;
   const spectralRadius = spectral?.spectral_radius || 0;
   const fiedlerValue = spectral?.fiedler_value || 0;
   const contagionIndex = spectral?.contagion_index || 0;
@@ -55,9 +77,9 @@ export default function MLDashboardPage() {
   // Risk distribution
   const riskDistribution = riskScores
     ? {
-        high: riskScores.filter((r) => r.stress_level > 0.7).length,
-        medium: riskScores.filter((r) => r.stress_level > 0.3 && r.stress_level <= 0.7).length,
-        low: riskScores.filter((r) => r.stress_level <= 0.3).length,
+        high: riskScores.filter((r) => (r.stress_level || 0) > 0.7).length,
+        medium: riskScores.filter((r) => (r.stress_level || 0) > 0.3 && (r.stress_level || 0) <= 0.7).length,
+        low: riskScores.filter((r) => (r.stress_level || 0) <= 0.3).length,
       }
     : null;
 
@@ -70,6 +92,10 @@ export default function MLDashboardPage() {
           <p className="text-muted-foreground">
             Network-Based CCP Risk Analysis - Real RBI Bank Data
           </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            API: api.rudranet.xyz
+            {realtimeStatus?.available && ' • Real-time Simulation Enabled'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {health && (
@@ -78,8 +104,13 @@ export default function MLDashboardPage() {
               {health.status}
             </Badge>
           )}
+          {isRealtimeInitialized && (
+            <Badge variant="secondary" className="flex items-center gap-2">
+              Sim: {currentTimestep}/{maxTimesteps}
+            </Badge>
+          )}
           <Button
-            onClick={() => runSimulation()}
+            onClick={() => runSimulation(undefined)}
             disabled={isRunningSimulation}
           >
             <Play className="h-4 w-4 mr-2" />
@@ -356,6 +387,172 @@ export default function MLDashboardPage() {
               <Zap className="h-4 w-4 mr-2" />
               Market Shock (-40%)
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Real-time Simulation */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Real-time Simulation Engine</CardTitle>
+          <CardDescription>
+            Progressive timestep-based simulation with live contagion propagation
+            {isRealtimeInitialized && ` • Timestep ${currentTimestep}/${maxTimesteps}`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {/* Control Buttons */}
+            <div className="flex gap-2 flex-wrap">
+              {!isRealtimeInitialized ? (
+                <Button
+                  onClick={() => {
+                    initRealtime({ max_timesteps: 100 });
+                  }}
+                  disabled={isInitializingRealtime}
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Initialize Simulation
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    onClick={() => {
+                      stepRealtime({ n_steps: 10 });
+                    }}
+                    disabled={isSteppingRealtime || isRealtimeRunning || currentTimestep >= maxTimesteps}
+                  >
+                    <SkipForward className="h-4 w-4 mr-2" />
+                    Run 10 Steps
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      stepRealtime({ n_steps: 1 });
+                    }}
+                    disabled={isSteppingRealtime || isRealtimeRunning || currentTimestep >= maxTimesteps}
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    Single Step
+                  </Button>
+                  {isRealtimeRunning && (
+                    <Button
+                      variant="destructive"
+                      onClick={() => stopRealtime()}
+                    >
+                      <Pause className="h-4 w-4 mr-2" />
+                      Stop
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      initRealtime({ max_timesteps: 100 });
+                    }}
+                  >
+                    <RotateCcw className="h-4 w-4 mr-2" />
+                    Reset
+                  </Button>
+                </>
+              )}
+            </div>
+
+            {/* Apply Shock During Simulation */}
+            {isRealtimeInitialized && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Apply Shock During Simulation:</p>
+                <div className="flex gap-2 flex-wrap">
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => {
+                      stepRealtime({
+                        n_steps: 5,
+                        shock_config: {
+                          type: 'capital',
+                          magnitude: 0.2,
+                        },
+                      });
+                    }}
+                    disabled={isSteppingRealtime || currentTimestep >= maxTimesteps}
+                  >
+                    Capital Shock
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => {
+                      stepRealtime({
+                        n_steps: 5,
+                        shock_config: {
+                          type: 'liquidity',
+                          magnitude: 0.3,
+                        },
+                      });
+                    }}
+                    disabled={isSteppingRealtime || currentTimestep >= maxTimesteps}
+                  >
+                    Liquidity Shock
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => {
+                      stepRealtime({
+                        n_steps: 5,
+                        shock_config: {
+                          type: 'stress',
+                          magnitude: 0.4,
+                        },
+                      });
+                    }}
+                    disabled={isSteppingRealtime || currentTimestep >= maxTimesteps}
+                  >
+                    Stress Shock
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Live Metrics */}
+            {latestStep && (
+              <div className="grid gap-2 md:grid-cols-4 pt-4 border-t">
+                <div>
+                  <p className="text-xs text-muted-foreground">Defaults</p>
+                  <p className={`text-lg font-bold ${latestStep.default_count > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {latestStep.default_count}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Avg Stress</p>
+                  <p className={`text-lg font-bold ${latestStep.total_stress > 0.7 ? 'text-red-600' : 'text-green-600'}`}>
+                    {(latestStep.total_stress * 100).toFixed(1)}%
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Avg Capital</p>
+                  <p className={`text-lg font-bold ${latestStep.average_capital_ratio < 0.09 ? 'text-red-600' : 'text-green-600'}`}>
+                    {(latestStep.average_capital_ratio * 100).toFixed(2)}%
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Progress</p>
+                  <p className="text-lg font-bold">
+                    {((currentTimestep / maxTimesteps) * 100).toFixed(0)}%
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Progress Bar */}
+            {isRealtimeInitialized && (
+              <div className="w-full bg-secondary rounded-full h-2">
+                <div
+                  className="bg-primary h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(currentTimestep / maxTimesteps) * 100}%` }}
+                />
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
