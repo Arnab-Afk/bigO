@@ -151,11 +151,7 @@ class SimulationEngine:
         all_cascades: List[CascadeRound] = []
         all_defaults: Set[UUID] = set()
         
-        # Init1.5. Update default probabilities with ML predictions (if enabled)
-            if self.enable_ml and self.ml_predictor:
-                current_states = self._update_ml_predictions(current_states, all_defaults)
-            
-            # ialize beliefs
+        # Initialize beliefs
         self.belief_updater.initialize_beliefs(list(current_states.keys()))
         
         # Record initial state
@@ -177,6 +173,10 @@ class SimulationEngine:
                     shock = self._get_shock(shocks, shock_id)
                     if shock:
                         current_states = self._apply_shock(current_states, shock)
+            
+            # 1.5. Update default probabilities with ML predictions (if enabled)
+            if self.enable_ml and self.ml_predictor:
+                current_states = self._update_ml_predictions(current_states, all_defaults)
             
             # 2. Agent decision phase
             decisions = self._agent_decision_phase(current_states, t)
