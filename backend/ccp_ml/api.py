@@ -374,20 +374,56 @@ async def run_stress_test(config: StressTestConfig):
 
 @app.get("/api/margins")
 async def get_margins():
-    """Get margin requirements for all participants"""
-    if not state.ccp_engine or not state.ccp_engine.margin_requirements:
-        raise HTTPException(status_code=400, detail="Run simulation first")
+    """Get margin requirements for all participants using real bank names"""
+    if not state.network_builder:
+        raise HTTPException(status_code=400, detail="Not initialized")
     
-    return [
-        {
-            "bank_name": m.bank_name,
-            "base_margin": m.base_margin,
-            "network_addon": m.network_addon,
-            "total_margin": m.total_margin,
-            "explanation": m.explanation
-        }
-        for m in state.ccp_engine.margin_requirements
-    ]
+    # Use real bank names from network (sector exposure data)
+    network_metrics = state.network_builder.compute_network_metrics()
+    
+    if network_metrics.empty:
+        raise HTTPException(status_code=400, detail="No network data available")
+    
+    margins = []
+    BASE_MARGIN_RATE = 0.02
+    MAX_MARGIN_RATE = 0.15
+    NETWORK_MARGIN_WEIGHT = 0.3
+    
+    for _, row in network_metrics.iterrows():
+        bank_name = row.get('bank_name', 'Unknown')
+        
+        # Calculate margin based on network metrics
+        pagerank = row.get('pagerank', 0.01)
+        degree = row.get('degree_centrality', 0.5)
+        eigenvector = row.get('eigenvector_centrality', 0.1)
+        
+        # Network importance score
+        network_importance = min((pagerank * 10 + degree + eigenvector) / 3, 1.0)
+        
+        # Margin calculation
+        base_margin = BASE_MARGIN_RATE * (1 + network_importance)
+        network_addon = base_margin * network_importance * NETWORK_MARGIN_WEIGHT
+        total_margin = min(base_margin + network_addon, MAX_MARGIN_RATE)
+        
+        # Explanation
+        if network_importance > 0.7:
+            explanation = f"High margin due to systemic importance (centrality: {eigenvector:.3f})"
+        elif network_importance > 0.4:
+            explanation = f"Moderate margin - network score: {network_importance:.2f}"
+        else:
+            explanation = "Standard margin requirements"
+        
+        margins.append({
+            "bank_name": bank_name,
+            "base_margin": round(base_margin, 6),
+            "network_addon": round(network_addon, 6),
+            "total_margin": round(total_margin, 6),
+            "explanation": explanation
+        })
+    
+    # Sort by total margin descending
+    margins.sort(key=lambda x: x['total_margin'], reverse=True)
+    return margins
 
 @app.get("/api/default-fund")
 async def get_default_fund():
