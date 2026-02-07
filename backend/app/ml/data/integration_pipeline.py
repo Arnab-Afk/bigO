@@ -196,22 +196,27 @@ class DataIntegrationPipeline:
         # Find data start
         data_start = 0
         for idx, row in df.iterrows():
-            # Look for year column with actual data
-            if '2024-25' in str(row.iloc[1]) or '2023-24' in str(row.iloc[1]):
+            # Look for year column with actual data (in column 2 after 2 empty columns)
+            if '2024-25' in str(row.iloc[2]) or '2023-24' in str(row.iloc[2]):
                 data_start = idx
                 break
         
         df_clean = df.iloc[data_start:].copy()
         
-        # Extract relevant columns
+        # The CSV has 2 empty leading columns, so we drop them first
+        # Then rename the remaining columns
         # Structure: Year, Ratios, SBI, Nationalized, PSB, Private, Foreign, Small Finance, Payments, All SCBs
+        if len(df_clean.columns) > 10:
+            # Drop first 2 empty columns
+            df_clean = df_clean.iloc[:, 2:]
+        
         expected_cols = [
             'Year', 'Ratio', 'SBI', 'Nationalized', 'PSB', 'Private', 
             'Foreign', 'SmallFinance', 'Payments', 'All_SCB'
         ]
         
-        if len(df_clean.columns) >= len(expected_cols):
-            df_clean.columns = expected_cols[:len(df_clean.columns)]
+        if len(df_clean.columns) == len(expected_cols):
+            df_clean.columns = expected_cols
         
         return df_clean
     
