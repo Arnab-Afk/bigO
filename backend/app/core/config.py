@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     MONTE_CARLO_DEFAULT_RUNS: int = 1000
     SIMULATION_TIMEOUT_SECONDS: int = 3600
     
+    # LLM / Featherless AI
+    FEATHERLESS_API_KEY: Optional[str] = None
+    FEATHERLESS_MODEL: str = "meta-llama/Meta-Llama-3.1-70B-Instruct"
+    FEATHERLESS_API_BASE: str = "https://api.featherless.ai/v1"
+    
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"

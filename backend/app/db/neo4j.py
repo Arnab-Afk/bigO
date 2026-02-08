@@ -393,10 +393,405 @@ class Neo4jClient:
     async def clear_database(self):
         """Clear all data from Neo4j (use with caution!)"""
         query = "MATCH (n) DETACH DELETE n"
-        
+
         async with self.session() as session:
             await session.run(query)
             logger.warning("Cleared Neo4j database")
+
+    async def sync_network_from_simulation(
+        self,
+        simulation_id: str,
+        network: Any,
+        timestep: int
+    ) -> Dict[str, Any]:
+        """
+        Sync NetworkX graph to Neo4j for a simulation timestep
+
+        Args:
+            simulation_id: Unique simulation identifier
+            network: NetworkX DiGraph from simulation
+            timestep: Current simulation timestep
+
+        Returns:
+            Sync statistics
+        """
+        import networkx as nx
+
+        nodes_created = 0
+        edges_created = 0
+
+        async with self.session() as session:
+            # Create nodes with simulation context
+            for node_id in network.nodes():
+                node_data = network.nodes[node_id]
+                agent = node_data.get('agent')
+
+                properties = {
+                    'simulation_id': simulation_id,
+                    'timestep': timestep,
+                    'node_id': node_id,
+                    'agent_type': node_data.get('agent_type', 'unknown'),
+                    'alive': node_data.get('alive', True)
+                }
+
+                # Add agent-specific properties
+                if agent:
+                    properties['health'] = float(agent.compute_health())
+                    if hasattr(agent, 'capital'):
+                        properties['capital'] = float(agent.capital)
+                    if hasattr(agent, 'liquidity'):
+                        properties['liquidity'] = float(agent.liquidity)
+                    if hasattr(agent, 'crar'):
+                        properties['crar'] = float(agent.crar)
+
+                query = """
+                MERGE (n:SimNode {simulation_id: $simulation_id, node_id: $node_id, timestep: $timestep})
+                SET n += $properties
+                RETURN n
+                """
+
+                await session.run(
+                    query,
+                    simulation_id=simulation_id,
+                    node_id=node_id,
+                    timestep=timestep,
+                    properties=properties
+                )
+                nodes_created += 1
+
+            # Create edges
+            for source, target, edge_data in network.edges(data=True):
+                properties = {
+                    'simulation_id': simulation_id,
+                    'timestep': timestep,
+                    'weight': float(edge_data.get('weight', 0.0)),
+                    'edge_type': edge_data.get('edge_type', edge_data.get('type', 'unknown'))
+                }
+
+                query = """
+                MATCH (source:SimNode {simulation_id: $simulation_id, node_id: $source, timestep: $timestep})
+                MATCH (target:SimNode {simulation_id: $simulation_id, node_id: $target, timestep: $timestep})
+                MERGE (source)-[r:EXPOSES {simulation_id: $simulation_id, timestep: $timestep}]->(target)
+                SET r += $properties
+                RETURN r
+                """
+
+                await session.run(
+                    query,
+                    simulation_id=simulation_id,
+                    source=source,
+                    target=target,
+                    timestep=timestep,
+                    properties=properties
+                )
+                edges_created += 1
+
+        logger.info(
+            f"Synced network to Neo4j",
+            simulation_id=simulation_id,
+            timestep=timestep,
+            nodes=nodes_created,
+            edges=edges_created
+        )
+
+        return {
+            'nodes_created': nodes_created,
+            'edges_created': edges_created,
+            'timestep': timestep
+        }
+
+    async def load_network_to_simulation(
+        self,
+        simulation_id: str,
+        timestep: int
+    ) -> Dict[str, Any]:
+        """
+        Load Neo4j graph back to NetworkX for simulation
+
+        Args:
+            simulation_id: Unique simulation identifier
+            timestep: Timestep to load
+
+        Returns:
+            Graph data (nodes and edges)
+        """
+        async with self.session() as session:
+            # Load nodes
+            nodes_query = """
+            MATCH (n:SimNode {simulation_id: $simulation_id, timestep: $timestep})
+            RETURN n.node_id AS node_id, properties(n) AS properties
+            """
+
+            nodes_result = await session.run(
+                nodes_query,
+                simulation_id=simulation_id,
+                timestep=timestep
+            )
+            nodes = await nodes_result.values()
+
+            # Load edges
+            edges_query = """
+            MATCH (source:SimNode {simulation_id: $simulation_id, timestep: $timestep})
+                  -[r:EXPOSES {simulation_id: $simulation_id, timestep: $timestep}]->
+                  (target:SimNode {simulation_id: $simulation_id, timestep: $timestep})
+            RETURN source.node_id AS source, target.node_id AS target, properties(r) AS properties
+            """
+
+            edges_result = await session.run(
+                edges_query,
+                simulation_id=simulation_id,
+                timestep=timestep
+            )
+            edges = await edges_result.values()
+
+        return {
+            'nodes': [{'id': n[0], 'properties': n[1]} for n in nodes],
+            'edges': [{'source': e[0], 'target': e[1], 'properties': e[2]} for e in edges]
+        }
+
+    async def run_pagerank_algorithm(
+        self,
+        simulation_id: str,
+        timestep: int,
+        dampingFactor: float = 0.85,
+        max_iterations: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Run PageRank algorithm using Neo4j GDS
+
+        Args:
+            simulation_id: Simulation identifier
+            timestep: Timestep to analyze
+            dampingFactor: PageRank damping factor
+            max_iterations: Maximum iterations
+
+        Returns:
+            List of nodes with PageRank scores
+        """
+        graph_name = f"sim_{simulation_id}_t{timestep}_pagerank"
+
+        async with self.session() as session:
+            # Create graph projection
+            try:
+                projection_query = """
+                CALL gds.graph.project(
+                    $graphName,
+                    {
+                        SimNode: {
+                            label: 'SimNode',
+                            properties: ['health', 'capital']
+                        }
+                    },
+                    {
+                        EXPOSES: {
+                            type: 'EXPOSES',
+                            orientation: 'NATURAL',
+                            properties: ['weight']
+                        }
+                    },
+                    {
+                        nodeProperties: {
+                            simulation_id: $simulation_id,
+                            timestep: $timestep
+                        },
+                        relationshipProperties: {
+                            simulation_id: $simulation_id,
+                            timestep: $timestep
+                        }
+                    }
+                )
+                """
+                await session.run(
+                    projection_query,
+                    graphName=graph_name,
+                    simulation_id=simulation_id,
+                    timestep=timestep
+                )
+            except Exception as e:
+                logger.debug(f"Graph projection exists or failed: {e}")
+
+            # Run PageRank
+            pagerank_query = """
+            CALL gds.pageRank.stream($graphName, {
+                dampingFactor: $dampingFactor,
+                maxIterations: $maxIterations
+            })
+            YIELD nodeId, score
+            RETURN gds.util.asNode(nodeId).node_id AS node_id,
+                   gds.util.asNode(nodeId).agent_type AS agent_type,
+                   score
+            ORDER BY score DESC
+            """
+
+            result = await session.run(
+                pagerank_query,
+                graphName=graph_name,
+                dampingFactor=dampingFactor,
+                maxIterations=max_iterations
+            )
+            records = await result.values()
+
+            # Clean up projection
+            try:
+                await session.run("CALL gds.graph.drop($graphName)", graphName=graph_name)
+            except Exception as e:
+                logger.debug(f"Failed to drop graph projection: {e}")
+
+        return [
+            {
+                'node_id': record[0],
+                'agent_type': record[1],
+                'pagerank_score': float(record[2])
+            }
+            for record in records
+        ]
+
+    async def run_louvain_community_detection(
+        self,
+        simulation_id: str,
+        timestep: int,
+        max_levels: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Run Louvain community detection using Neo4j GDS
+
+        Args:
+            simulation_id: Simulation identifier
+            timestep: Timestep to analyze
+            max_levels: Maximum hierarchy levels
+
+        Returns:
+            Community assignments and statistics
+        """
+        graph_name = f"sim_{simulation_id}_t{timestep}_louvain"
+
+        async with self.session() as session:
+            # Create graph projection
+            try:
+                projection_query = """
+                CALL gds.graph.project(
+                    $graphName,
+                    'SimNode',
+                    'EXPOSES',
+                    {
+                        nodeProperties: {
+                            filter: {
+                                simulation_id: $simulation_id,
+                                timestep: $timestep
+                            }
+                        },
+                        relationshipProperties: ['weight']
+                    }
+                )
+                """
+                await session.run(
+                    projection_query,
+                    graphName=graph_name,
+                    simulation_id=simulation_id,
+                    timestep=timestep
+                )
+            except Exception as e:
+                logger.debug(f"Graph projection exists or failed: {e}")
+
+            # Run Louvain
+            louvain_query = """
+            CALL gds.louvain.stream($graphName, {
+                maxLevels: $maxLevels,
+                relationshipWeightProperty: 'weight'
+            })
+            YIELD nodeId, communityId, intermediateCommunityIds
+            RETURN gds.util.asNode(nodeId).node_id AS node_id,
+                   gds.util.asNode(nodeId).agent_type AS agent_type,
+                   communityId,
+                   intermediateCommunityIds
+            """
+
+            result = await session.run(
+                louvain_query,
+                graphName=graph_name,
+                maxLevels=max_levels
+            )
+            records = await result.values()
+
+            # Clean up
+            try:
+                await session.run("CALL gds.graph.drop($graphName)", graphName=graph_name)
+            except Exception as e:
+                logger.debug(f"Failed to drop graph projection: {e}")
+
+        communities = {}
+        for record in records:
+            node_id = record[0]
+            community_id = record[2]
+
+            if community_id not in communities:
+                communities[community_id] = []
+            communities[community_id].append({
+                'node_id': node_id,
+                'agent_type': record[1]
+            })
+
+        return {
+            'num_communities': len(communities),
+            'communities': communities,
+            'assignments': [
+                {
+                    'node_id': record[0],
+                    'community_id': int(record[2])
+                }
+                for record in records
+            ]
+        }
+
+    async def run_shortest_path_analysis(
+        self,
+        simulation_id: str,
+        timestep: int,
+        source_node: str,
+        target_node: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Find shortest weighted path between two nodes
+
+        Args:
+            simulation_id: Simulation identifier
+            timestep: Timestep to analyze
+            source_node: Source node ID
+            target_node: Target node ID
+
+        Returns:
+            Path information or None if no path exists
+        """
+        async with self.session() as session:
+            query = """
+            MATCH (source:SimNode {simulation_id: $simulation_id, timestep: $timestep, node_id: $source_node})
+            MATCH (target:SimNode {simulation_id: $simulation_id, timestep: $timestep, node_id: $target_node})
+            MATCH path = shortestPath((source)-[:EXPOSES*]-(target))
+            WITH path,
+                 reduce(w = 0, rel in relationships(path) | w + rel.weight) AS total_weight
+            RETURN [node IN nodes(path) | node.node_id] AS path_nodes,
+                   length(path) AS path_length,
+                   total_weight
+            ORDER BY total_weight DESC
+            LIMIT 1
+            """
+
+            result = await session.run(
+                query,
+                simulation_id=simulation_id,
+                timestep=timestep,
+                source_node=source_node,
+                target_node=target_node
+            )
+
+            record = await result.single()
+            if record:
+                return {
+                    'path': record['path_nodes'],
+                    'length': record['path_length'],
+                    'total_weight': float(record['total_weight'])
+                }
+            return None
 
 
 # Global client instance
