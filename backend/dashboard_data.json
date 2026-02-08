@@ -1,0 +1,900 @@
+{
+  "d3_network": {
+    "nodes": [
+      {
+        "id": "BANK_1",
+        "group": "bank",
+        "health": 0.3,
+        "color": "#e74c3c",
+        "alive": true,
+        "size": 16.0,
+        "mode": "distress",
+        "type": "bank",
+        "capital": 565.0,
+        "crar": 5.65,
+        "liquidity": 500,
+        "npa_ratio": 31.0,
+        "risk_appetite": 0.1
+      },
+      {
+        "id": "BANK_2",
+        "group": "bank",
+        "health": 0.3,
+        "color": "#e74c3c",
+        "alive": true,
+        "size": 16.0,
+        "mode": "distress",
+        "type": "bank",
+        "capital": 678.0,
+        "crar": 5.65,
+        "liquidity": 600,
+        "npa_ratio": 31.5,
+        "risk_appetite": 0.1
+      },
+      {
+        "id": "BANK_3",
+        "group": "bank",
+        "health": 0.3,
+        "color": "#e74c3c",
+        "alive": true,
+        "size": 16.0,
+        "mode": "distress",
+        "type": "bank",
+        "capital": 791.0,
+        "crar": 5.65,
+        "liquidity": 700,
+        "npa_ratio": 32.0,
+        "risk_appetite": 0.1
+      },
+      {
+        "id": "BANK_4",
+        "group": "bank",
+        "health": 0.3,
+        "color": "#e74c3c",
+        "alive": true,
+        "size": 16.0,
+        "mode": "distress",
+        "type": "bank",
+        "capital": 904.0,
+        "crar": 5.65,
+        "liquidity": 800,
+        "npa_ratio": 32.5,
+        "risk_appetite": 0.1
+      },
+      {
+        "id": "BANK_5",
+        "group": "bank",
+        "health": 0.3,
+        "color": "#e74c3c",
+        "alive": true,
+        "size": 16.0,
+        "mode": "distress",
+        "type": "bank",
+        "capital": 1017.0,
+        "crar": 5.65,
+        "liquidity": 900,
+        "npa_ratio": 33.0,
+        "risk_appetite": 0.1
+      },
+      {
+        "id": "SECTOR_REAL_ESTATE",
+        "group": "sector",
+        "health": 0.8,
+        "color": "#27ae60",
+        "alive": true,
+        "size": 26.0,
+        "mode": "normal",
+        "type": "sector",
+        "economic_health": 0.8,
+        "debt_load": 0.0
+      },
+      {
+        "id": "SECTOR_COMMODITIES",
+        "group": "sector",
+        "health": 0.44999999999999996,
+        "color": "#f39c12",
+        "alive": true,
+        "size": 19.0,
+        "mode": "defensive",
+        "type": "sector",
+        "economic_health": 0.44999999999999996,
+        "debt_load": 0.0
+      },
+      {
+        "id": "CCP_MAIN",
+        "group": "ccp",
+        "health": 1.0,
+        "color": "#27ae60",
+        "alive": true,
+        "size": 30.0,
+        "mode": "normal",
+        "type": "ccp"
+      },
+      {
+        "id": "RBI",
+        "group": "regulator",
+        "health": 0.8298755184754296,
+        "color": "#27ae60",
+        "alive": true,
+        "size": 26.59751036950859,
+        "mode": "normal",
+        "type": "regulator"
+      }
+    ],
+    "links": [
+      {
+        "source": "BANK_1",
+        "target": "SECTOR_REAL_ESTATE",
+        "value": 2000,
+        "type": "loan",
+        "width": 2.0
+      },
+      {
+        "source": "BANK_1",
+        "target": "SECTOR_COMMODITIES",
+        "value": 1500,
+        "type": "loan",
+        "width": 1.5
+      },
+      {
+        "source": "BANK_1",
+        "target": "BANK_2",
+        "value": 500,
+        "type": "loan",
+        "width": 1
+      },
+      {
+        "source": "BANK_2",
+        "target": "SECTOR_REAL_ESTATE",
+        "value": 2500,
+        "type": "loan",
+        "width": 2.5
+      },
+      {
+        "source": "BANK_2",
+        "target": "SECTOR_COMMODITIES",
+        "value": 1800,
+        "type": "loan",
+        "width": 1.8
+      },
+      {
+        "source": "BANK_2",
+        "target": "BANK_3",
+        "value": 600,
+        "type": "loan",
+        "width": 1
+      },
+      {
+        "source": "BANK_3",
+        "target": "SECTOR_REAL_ESTATE",
+        "value": 3000,
+        "type": "loan",
+        "width": 3.0
+      },
+      {
+        "source": "BANK_3",
+        "target": "SECTOR_COMMODITIES",
+        "value": 2100,
+        "type": "loan",
+        "width": 2.1
+      },
+      {
+        "source": "BANK_3",
+        "target": "BANK_4",
+        "value": 400,
+        "type": "loan",
+        "width": 1
+      },
+      {
+        "source": "BANK_4",
+        "target": "SECTOR_REAL_ESTATE",
+        "value": 3500,
+        "type": "loan",
+        "width": 3.5
+      },
+      {
+        "source": "BANK_4",
+        "target": "SECTOR_COMMODITIES",
+        "value": 2400,
+        "type": "loan",
+        "width": 2.4
+      },
+      {
+        "source": "BANK_5",
+        "target": "SECTOR_REAL_ESTATE",
+        "value": 4000,
+        "type": "loan",
+        "width": 4.0
+      },
+      {
+        "source": "BANK_5",
+        "target": "SECTOR_COMMODITIES",
+        "value": 2700,
+        "type": "loan",
+        "width": 2.7
+      }
+    ],
+    "metadata": {
+      "timestep": 19,
+      "global_metrics": {
+        "system_liquidity": 0.8298755184754296,
+        "market_volatility": 0.0,
+        "system_npa": 29.5,
+        "base_repo_rate": 6.0,
+        "survival_rate": 1.0,
+        "avg_crar": 5.65,
+        "total_defaults": 0,
+        "avg_npa": 32.0
+      }
+    }
+  },
+  "cytoscape_network": [
+    {
+      "data": {
+        "id": "BANK_1",
+        "label": "BANK 1",
+        "type": "bank",
+        "health": 0.3,
+        "alive": true,
+        "mode": "distress",
+        "capital": 565.0,
+        "crar": 5.65,
+        "liquidity": 500,
+        "npa_ratio": 31.0,
+        "risk_appetite": 0.1
+      },
+      "classes": "bank"
+    },
+    {
+      "data": {
+        "id": "BANK_2",
+        "label": "BANK 2",
+        "type": "bank",
+        "health": 0.3,
+        "alive": true,
+        "mode": "distress",
+        "capital": 678.0,
+        "crar": 5.65,
+        "liquidity": 600,
+        "npa_ratio": 31.5,
+        "risk_appetite": 0.1
+      },
+      "classes": "bank"
+    },
+    {
+      "data": {
+        "id": "BANK_3",
+        "label": "BANK 3",
+        "type": "bank",
+        "health": 0.3,
+        "alive": true,
+        "mode": "distress",
+        "capital": 791.0,
+        "crar": 5.65,
+        "liquidity": 700,
+        "npa_ratio": 32.0,
+        "risk_appetite": 0.1
+      },
+      "classes": "bank"
+    },
+    {
+      "data": {
+        "id": "BANK_4",
+        "label": "BANK 4",
+        "type": "bank",
+        "health": 0.3,
+        "alive": true,
+        "mode": "distress",
+        "capital": 904.0,
+        "crar": 5.65,
+        "liquidity": 800,
+        "npa_ratio": 32.5,
+        "risk_appetite": 0.1
+      },
+      "classes": "bank"
+    },
+    {
+      "data": {
+        "id": "BANK_5",
+        "label": "BANK 5",
+        "type": "bank",
+        "health": 0.3,
+        "alive": true,
+        "mode": "distress",
+        "capital": 1017.0,
+        "crar": 5.65,
+        "liquidity": 900,
+        "npa_ratio": 33.0,
+        "risk_appetite": 0.1
+      },
+      "classes": "bank"
+    },
+    {
+      "data": {
+        "id": "SECTOR_REAL_ESTATE",
+        "label": "SECTOR REAL ESTATE",
+        "type": "sector",
+        "health": 0.8,
+        "alive": true,
+        "mode": "normal",
+        "economic_health": 0.8,
+        "debt_load": 0.0
+      },
+      "classes": "sector"
+    },
+    {
+      "data": {
+        "id": "SECTOR_COMMODITIES",
+        "label": "SECTOR COMMODITIES",
+        "type": "sector",
+        "health": 0.44999999999999996,
+        "alive": true,
+        "mode": "defensive",
+        "economic_health": 0.44999999999999996,
+        "debt_load": 0.0
+      },
+      "classes": "sector"
+    },
+    {
+      "data": {
+        "id": "CCP_MAIN",
+        "label": "CCP MAIN",
+        "type": "ccp",
+        "health": 1.0,
+        "alive": true,
+        "mode": "normal"
+      },
+      "classes": "ccp"
+    },
+    {
+      "data": {
+        "id": "RBI",
+        "label": "RBI",
+        "type": "regulator",
+        "health": 0.8298755184754296,
+        "alive": true,
+        "mode": "normal"
+      },
+      "classes": "regulator"
+    },
+    {
+      "data": {
+        "id": "BANK_1-SECTOR_REAL_ESTATE",
+        "source": "BANK_1",
+        "target": "SECTOR_REAL_ESTATE",
+        "weight": 2000,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_1-SECTOR_COMMODITIES",
+        "source": "BANK_1",
+        "target": "SECTOR_COMMODITIES",
+        "weight": 1500,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_1-BANK_2",
+        "source": "BANK_1",
+        "target": "BANK_2",
+        "weight": 500,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_2-SECTOR_REAL_ESTATE",
+        "source": "BANK_2",
+        "target": "SECTOR_REAL_ESTATE",
+        "weight": 2500,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_2-SECTOR_COMMODITIES",
+        "source": "BANK_2",
+        "target": "SECTOR_COMMODITIES",
+        "weight": 1800,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_2-BANK_3",
+        "source": "BANK_2",
+        "target": "BANK_3",
+        "weight": 600,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_3-SECTOR_REAL_ESTATE",
+        "source": "BANK_3",
+        "target": "SECTOR_REAL_ESTATE",
+        "weight": 3000,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_3-SECTOR_COMMODITIES",
+        "source": "BANK_3",
+        "target": "SECTOR_COMMODITIES",
+        "weight": 2100,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_3-BANK_4",
+        "source": "BANK_3",
+        "target": "BANK_4",
+        "weight": 400,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_4-SECTOR_REAL_ESTATE",
+        "source": "BANK_4",
+        "target": "SECTOR_REAL_ESTATE",
+        "weight": 3500,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_4-SECTOR_COMMODITIES",
+        "source": "BANK_4",
+        "target": "SECTOR_COMMODITIES",
+        "weight": 2400,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_5-SECTOR_REAL_ESTATE",
+        "source": "BANK_5",
+        "target": "SECTOR_REAL_ESTATE",
+        "weight": 4000,
+        "type": "loan"
+      }
+    },
+    {
+      "data": {
+        "id": "BANK_5-SECTOR_COMMODITIES",
+        "source": "BANK_5",
+        "target": "SECTOR_COMMODITIES",
+        "weight": 2700,
+        "type": "loan"
+      }
+    }
+  ],
+  "survival_rate_ts": {
+    "metric": "survival_rate",
+    "timesteps": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "values": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "avg_crar_ts": {
+    "metric": "avg_crar",
+    "timesteps": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "values": [
+      14.0,
+      14.0,
+      14.0,
+      14.0,
+      14.0,
+      14.0,
+      9.85,
+      9.700000000000001,
+      9.55,
+      9.4,
+      9.025,
+      8.649999999999999,
+      8.275,
+      7.9,
+      7.525,
+      7.15,
+      6.775,
+      6.4,
+      6.0249999999999995,
+      5.65
+    ]
+  },
+  "system_npa_ts": {
+    "metric": "avg_npa",
+    "timesteps": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "values": [
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      4.0,
+      5.0,
+      6.0,
+      7.0,
+      9.5,
+      12.0,
+      14.5,
+      17.0,
+      19.5,
+      22.0,
+      24.5,
+      27.0,
+      29.5,
+      32.0
+    ]
+  },
+  "health_heatmap": {
+    "agents": [
+      "BANK_1",
+      "BANK_2",
+      "BANK_3",
+      "BANK_4",
+      "BANK_5",
+      "SECTOR_REAL_ESTATE",
+      "SECTOR_COMMODITIES",
+      "CCP_MAIN",
+      "RBI"
+    ],
+    "timesteps": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "matrix": [
+      [
+        0.6233333333333333,
+        0.6666666666666667,
+        0.7100000000000001,
+        0.7533333333333333,
+        0.7966666666666666,
+        0.8,
+        0.75,
+        1.0,
+        0.4999999999285714
+      ],
+      [
+        0.6233333333333333,
+        0.6666666666666667,
+        0.7100000000000001,
+        0.7533333333333333,
+        0.7966666666666666,
+        0.8,
+        0.75,
+        1.0,
+        0.4999999999285714
+      ],
+      [
+        0.6233333333333333,
+        0.6666666666666667,
+        0.7100000000000001,
+        0.7533333333333333,
+        0.7966666666666666,
+        0.8,
+        0.75,
+        1.0,
+        0.4999999999285714
+      ],
+      [
+        0.6233333333333333,
+        0.6666666666666667,
+        0.7100000000000001,
+        0.7533333333333333,
+        0.7966666666666666,
+        0.8,
+        0.75,
+        1.0,
+        0.4999999999285714
+      ],
+      [
+        0.6233333333333333,
+        0.6666666666666667,
+        0.7100000000000001,
+        0.7533333333333333,
+        0.7966666666666666,
+        0.8,
+        0.75,
+        1.0,
+        0.4999999999285714
+      ],
+      [
+        0.6233333333333333,
+        0.6666666666666667,
+        0.7100000000000001,
+        0.7533333333333333,
+        0.7966666666666666,
+        0.8,
+        0.75,
+        1.0,
+        0.4999999999285714
+      ],
+      [
+        0.5025,
+        0.4958333333333333,
+        0.48916666666666664,
+        0.48249999999999993,
+        0.47583333333333333,
+        0.8,
+        0.6,
+        1.0,
+        0.4999999999285714
+      ],
+      [
+        0.4816666666666667,
+        0.475,
+        0.4683333333333334,
+        0.46166666666666667,
+        0.455,
+        0.8,
+        0.6,
+        1.0,
+        0.5076142131243488
+      ],
+      [
+        0.4608333333333334,
+        0.4541666666666667,
+        0.4475,
+        0.44083333333333335,
+        0.4341666666666667,
+        0.8,
+        0.6,
+        1.0,
+        0.515463917449858
+      ],
+      [
+        0.44,
+        0.43333333333333335,
+        0.4266666666666667,
+        0.42000000000000004,
+        0.41333333333333333,
+        0.8,
+        0.6,
+        1.0,
+        0.5235602093457651
+      ],
+      [
+        0.3879166666666667,
+        0.38125000000000003,
+        0.3745833333333334,
+        0.36791666666666667,
+        0.36125,
+        0.8,
+        0.44999999999999996,
+        1.0,
+        0.5319148935361832
+      ],
+      [
+        0.35333333333333333,
+        0.3466666666666667,
+        0.33999999999999997,
+        0.3333333333333333,
+        0.32666666666666666,
+        0.8,
+        0.44999999999999996,
+        1.0,
+        0.5540166204109194
+      ],
+      [
+        0.32,
+        0.3133333333333333,
+        0.30666666666666664,
+        0.3,
+        0.3,
+        0.8,
+        0.44999999999999996,
+        1.0,
+        0.5780346819854608
+      ],
+      [
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.8,
+        0.44999999999999996,
+        1.0,
+        0.6042296071464428
+      ],
+      [
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.8,
+        0.44999999999999996,
+        1.0,
+        0.6329113922906128
+      ],
+      [
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.8,
+        0.44999999999999996,
+        1.0,
+        0.6644518271163831
+      ],
+      [
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.8,
+        0.44999999999999996,
+        1.0,
+        0.6993006991609788
+      ],
+      [
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.8,
+        0.44999999999999996,
+        1.0,
+        0.738007379918185
+      ],
+      [
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.8,
+        0.44999999999999996,
+        1.0,
+        0.7812499998256138
+      ],
+      [
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.3,
+        0.8,
+        0.44999999999999996,
+        1.0,
+        0.8298755184754296
+      ]
+    ]
+  },
+  "critical_nodes": [],
+  "network_metrics": {
+    "avg_degree_centrality": 0.3611111111111111,
+    "max_degree_centrality": 0.625,
+    "avg_betweenness_centrality": 0.007936507936507936,
+    "avg_clustering": 0.36296296296296293,
+    "density": 0.18055555555555555,
+    "num_weakly_connected_components": 3
+  },
+  "cascade_tree": {
+    "root_failures": [],
+    "cascades": []
+  },
+  "current_timestep": 19,
+  "global_metrics": {
+    "system_liquidity": 0.8298755184754296,
+    "market_volatility": 0.0,
+    "system_npa": 29.5,
+    "base_repo_rate": 6.0,
+    "survival_rate": 1.0,
+    "avg_crar": 5.65,
+    "total_defaults": 0,
+    "avg_npa": 32.0
+  }
+}
