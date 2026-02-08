@@ -88,9 +88,16 @@ class UserDecisionRequest(BaseModel):
 
 class ShockRequest(BaseModel):
     """Request to apply an exogenous shock"""
-    shock_type: str = Field(..., description="Type of shock: sector_crisis, liquidity_squeeze, interest_rate_shock, asset_price_crash")
-    target: Optional[str] = Field(None, description="Target agent ID (for sector_crisis)")
-    magnitude: float = Field(-0.2, ge=-1.0, le=1.0, description="Shock magnitude")
+    shock_type: str = Field(
+        ...,
+        description="Type of shock: real_estate_shock, manufacturing_shock, agriculture_shock, energy_shock, export_shock, services_shock, msme_shock, technology_shock, retail_shock, infrastructure_shock, sector_crisis, liquidity_squeeze, interest_rate_shock, asset_price_crash"
+    )
+    target: Optional[str] = Field(None, description="Target agent ID (for legacy sector_crisis)")
+    magnitude: float = Field(-0.2, ge=-1.0, le=1.0, description="Shock magnitude for legacy shocks")
+    severity: Optional[str] = Field(
+        "moderate",
+        description="Severity for sector shocks: mild, moderate, severe, crisis"
+    )
 
 
 class PolicyRuleRequest(BaseModel):
@@ -99,6 +106,12 @@ class PolicyRuleRequest(BaseModel):
     rule_name: str = Field(..., description="Rule name")
     condition: str = Field(..., description="Python condition expression (e.g., 'system_npa > 8.0')")
     action: str = Field(..., description="Python action expression (e.g., 'haircut_rate += 0.05')")
+
+
+class UpdateAgentPolicyRequest(BaseModel):
+    """Request to update user agent policies"""
+    agent_id: str = Field(..., description="Agent ID to update")
+    policies: Dict[str, Any] = Field(..., description="Policy key-value pairs to update")
 
 
 class StateResponse(BaseModel):
@@ -306,7 +319,7 @@ async def initialize_simulation(request: SimulationInitRequest) -> SimulationIni
         # Get initial state
         initial_snapshot = ecosystem._create_snapshot([])
         
-        logger.info(f"Initialized simulation {sim_id}: {request.name}")
+        # logger.info(f"Initialized simulation {sim_id}: {request.name}")
         
         return SimulationInitResponse(
             simulation_id=sim_id,
@@ -347,7 +360,7 @@ async def step_simulation(sim_id: str, request: StepRequest) -> StepResponse:
             # Check if there's a pending decision from previous step
             if sim_id in PENDING_DECISIONS:
                 pending_decision = PENDING_DECISIONS[sim_id]
-                logger.info(f"Simulation {sim_id} paused - waiting for user decision")
+                # logger.info(f"Simulation {sim_id} paused - waiting for user decision")
                 break
             
             snapshot = ecosystem.step()
@@ -366,7 +379,7 @@ async def step_simulation(sim_id: str, request: StepRequest) -> StepResponse:
                         **risk_decision
                     }
                     pending_decision = PENDING_DECISIONS[sim_id]
-                    logger.info(f"User decision required for {sim_id}: {risk_decision['title']}")
+                    # logger.info(f"User decision required for {sim_id}: {risk_decision['title']}")
                     break
         
         return StepResponse(
@@ -428,7 +441,7 @@ async def respond_to_decision(sim_id: str, request: UserDecisionRequest):
                         # Reduce RWA by selling assets/calling in loans
                         if target_rwa < user_agent.risk_weighted_assets:
                             user_agent.risk_weighted_assets = target_rwa
-                            logger.info(f"Reduced RWA from {user_agent.risk_weighted_assets:.2f} to {target_rwa:.2f}")
+                            # logger.info(f"Reduced RWA from {user_agent.risk_weighted_assets:.2f} to {target_rwa:.2f}")
                         
                         # Recalculate CRAR
                         user_agent.crar = (user_agent.capital / user_agent.risk_weighted_assets) * 100 if user_agent.risk_weighted_assets > 0 else 100.0
@@ -442,7 +455,7 @@ async def respond_to_decision(sim_id: str, request: UserDecisionRequest):
                     liquidity_target = user_agent.capital * 0.3
                     user_agent.liquidity = max(user_agent.liquidity, liquidity_target)
                     
-                    logger.info(f"Applied DELEVERAGE action for {user_agent.agent_id}: CRAR {current_crar:.2f}% -> {user_agent.crar:.2f}%")
+                    # logger.info(f"Applied DELEVERAGE action for {user_agent.agent_id}: CRAR {current_crar:.2f}% -> {user_agent.crar:.2f}%")
                 
                 elif action_type == 'defensive':
                     user_agent.interbank_limit *= 0.8
@@ -452,18 +465,18 @@ async def respond_to_decision(sim_id: str, request: UserDecisionRequest):
                     liquidity_target = user_agent.capital * 0.25
                     if user_agent.liquidity < liquidity_target:
                         user_agent.liquidity += (liquidity_target - user_agent.liquidity) * 0.5
-                    logger.info(f"Applied DEFENSIVE action for {user_agent.agent_id}")
+                    # logger.info(f"Applied DEFENSIVE action for {user_agent.agent_id}")
                 
                 elif action_type == 'reduce_risk':
                     user_agent.risk_appetite = 0.3
                     user_agent.credit_supply_limit *= 0.9
-                    logger.info(f"Applied REDUCE_RISK action for {user_agent.agent_id}")
+                    # logger.info(f"Applied REDUCE_RISK action for {user_agent.agent_id}")
                 
                 result_message = f"Applied {action_type} action successfully"
             else:
                 # User rejected recommendation - no action taken
                 result_message = "User chose to maintain current strategy"
-                logger.info(f"User rejected recommendation for {user_agent.agent_id}")
+                # logger.info(f"User rejected recommendation for {user_agent.agent_id}")
             
             # Apply custom parameters if provided
             if request.custom_params:
@@ -576,20 +589,35 @@ async def apply_shock(sim_id: str, request: ShockRequest) -> Dict[str, Any]:
             "sector_crisis": ShockType.SECTOR_CRISIS,
             "liquidity_squeeze": ShockType.LIQUIDITY_SQUEEZE,
             "interest_rate_shock": ShockType.INTEREST_RATE_SHOCK,
-            "asset_price_crash": ShockType.ASSET_PRICE_CRASH
+            "asset_price_crash": ShockType.ASSET_PRICE_CRASH,
+            # New sector-specific shocks
+            "real_estate_shock": ShockType.REAL_ESTATE_SHOCK,
+            "infrastructure_shock": ShockType.INFRASTRUCTURE_SHOCK,
+            "manufacturing_shock": ShockType.MANUFACTURING_SHOCK,
+            "agriculture_shock": ShockType.AGRICULTURE_SHOCK,
+            "energy_shock": ShockType.ENERGY_SHOCK,
+            "export_shock": ShockType.EXPORT_SHOCK,
+            "services_shock": ShockType.SERVICES_SHOCK,
+            "msme_shock": ShockType.MSME_SHOCK,
+            "technology_shock": ShockType.TECHNOLOGY_SHOCK,
+            "retail_shock": ShockType.RETAIL_SHOCK,
         }
         
         shock_type = shock_type_map.get(request.shock_type.lower())
         if shock_type is None:
-            raise HTTPException(status_code=400, detail=f"Invalid shock type: {request.shock_type}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid shock type: {request.shock_type}. Valid: {list(shock_type_map.keys())}"
+            )
         
         shock_event = ecosystem.apply_shock(
             shock_type=shock_type,
             target=request.target,
-            magnitude=request.magnitude
+            magnitude=request.magnitude,
+            severity=request.severity
         )
         
-        logger.info(f"Applied shock to {sim_id}: {shock_event}")
+        # logger.info(f"Applied shock to {sim_id}: {shock_event}")
         
         return {
             "simulation_id": sim_id,
@@ -602,6 +630,111 @@ async def apply_shock(sim_id: str, request: ShockRequest) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error applying shock to {sim_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to apply shock: {str(e)}")
+
+
+@router.post("/{sim_id}/agent-policy", response_model=Dict[str, Any])
+async def update_agent_policy(sim_id: str, request: UpdateAgentPolicyRequest) -> Dict[str, Any]:
+    """
+    Update policies for a user-controlled agent (bank, CCP, etc.).
+    
+    This allows the frontend to update agent properties like risk_appetite,
+    min_capital_ratio, liquidity_buffer, etc. during the simulation.
+    
+    Example for Bank:
+    ```
+    {
+        "agent_id": "user_bank_123",
+        "policies": {
+            "risk_appetite": 0.65,
+            "min_capital_ratio": 11.5,
+            "liquidity_buffer": 0.15
+        }
+    }
+    ```
+    """
+    if sim_id not in ACTIVE_SIMULATIONS:
+        raise HTTPException(status_code=404, detail=f"Simulation {sim_id} not found")
+    
+    ecosystem = ACTIVE_SIMULATIONS[sim_id]
+    
+    try:
+        # Get the agent
+        agent = ecosystem.get_agent(request.agent_id)
+        
+        if agent is None:
+            raise HTTPException(status_code=404, detail=f"Agent {request.agent_id} not found")
+        
+        # Map frontend policy names to backend attributes
+        policy_mapping = {
+            # Bank policies
+            'riskAppetite': 'risk_appetite',
+            'minCapitalRatio': 'regulatory_min_crar',
+            'liquidityBuffer': None,  # Not a direct attribute, handle specially
+            'maxExposurePerCounterparty': 'interbank_limit',
+            # CCP policies
+            'initialMargin': 'initial_margin_requirement',
+            'haircut': 'haircut_rate',
+            'stressTestMultiplier': None,  # Not implemented in current agent
+            # Regulator policies
+            'baseRepoRate': 'base_repo_rate',
+            'minimumCRAR': 'min_crar_requirement',
+            'crisisInterventionThreshold': None,  # Not a direct attribute
+            # Sector policies
+            'economicHealth': 'economic_health',
+            'debtLoad': 'debt_load',
+            'volatility': 'volatility'
+        }
+        
+        updated_fields = {}
+        
+        # Update agent attributes
+        for frontend_key, value in request.policies.items():
+            backend_key = policy_mapping.get(frontend_key, frontend_key)
+            
+            # Skip if not mapped
+            if backend_key is None:
+                logger.warning(f"Policy '{frontend_key}' not mapped to agent attribute, skipping")
+                continue
+            
+            # Special handling for percentage values that need conversion
+            if frontend_key == 'minCapitalRatio':
+                # Frontend sends as percentage (e.g., 11.5), backend expects decimal (e.g., 0.115)
+                value = value / 100.0
+            elif frontend_key == 'liquidityBuffer':
+                # Frontend sends as percentage (e.g., 15), backend expects decimal (e.g., 0.15)
+                # For banks, update liquidity directly as a percentage of capital
+                value = value / 100.0
+                if hasattr(agent, 'capital'):
+                    agent.liquidity = agent.capital * value
+                    updated_fields[frontend_key] = value
+                    logger.info(f"Updated bank liquidity to {agent.liquidity:.2f} ({value*100:.1f}% of capital)")
+                continue
+            elif frontend_key == 'maxExposurePerCounterparty':
+                # Frontend sends as percentage (e.g., 25), backend uses absolute value
+                # Convert to actual money amount based on agent's capital
+                value_percentage = value / 100.0
+                if hasattr(agent, 'capital'):
+                    value = agent.capital * value_percentage  # Convert to absolute amount
+            
+            if hasattr(agent, backend_key):
+                setattr(agent, backend_key, value)
+                updated_fields[frontend_key] = value
+                logger.info(f"Updated {request.agent_id}.{backend_key} to {value}")
+            else:
+                logger.warning(f"Agent {request.agent_id} does not have attribute: {backend_key}")
+        
+        return {
+            "simulation_id": sim_id,
+            "agent_id": request.agent_id,
+            "updated_policies": updated_fields,
+            "status": "success"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating agent policy in {sim_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update agent policy: {str(e)}")
 
 
 @router.post("/{sim_id}/policy", response_model=Dict[str, Any])
@@ -671,7 +804,7 @@ async def update_ccp_policy(sim_id: str, request: PolicyRuleRequest) -> Dict[str
         
         ccp_agent.add_policy_rule(rule)
         
-        logger.info(f"Added policy rule '{request.rule_name}' to {request.ccp_id} in simulation {sim_id}")
+        # logger.info(f"Added policy rule '{request.rule_name}' to {request.ccp_id} in simulation {sim_id}")
         
         return {
             "simulation_id": sim_id,
@@ -732,7 +865,7 @@ async def reset_simulation(sim_id: str) -> Dict[str, Any]:
     try:
         ecosystem.reset()
         
-        logger.info(f"Reset simulation {sim_id}")
+        # logger.info(f"Reset simulation {sim_id}")
         
         return {
             "simulation_id": sim_id,
@@ -756,7 +889,7 @@ async def delete_simulation(sim_id: str) -> Dict[str, Any]:
     try:
         del ACTIVE_SIMULATIONS[sim_id]
         
-        logger.info(f"Deleted simulation {sim_id}")
+        # logger.info(f"Deleted simulation {sim_id}")
         
         return {
             "simulation_id": sim_id,

@@ -59,6 +59,9 @@ export default function DashboardPage() {
     const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [pendingDecision, setPendingDecision] = useState<RiskDecision | null>(null);
+    const [selectedShockType, setSelectedShockType] = useState<string>("real_estate_shock");
+    const [selectedSeverity, setSelectedSeverity] = useState<string>("moderate");
+    const [showShockDropdown, setShowShockDropdown] = useState(false);
 
     const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -132,7 +135,7 @@ export default function DashboardPage() {
     }, [isPlaying, simId]);
 
     const stepSimulation = async (steps: number = 1) => {
-        if (!simId) return;
+        if (!simId || isLoading) return;
 
         setIsLoading(true);
         setError(null);
@@ -199,16 +202,23 @@ export default function DashboardPage() {
         }
     };
 
-    const handleShockRealEstate = async () => {
-        if (!simId) return;
+    const handleApplyShock = async () => {
+        if (!simId || isLoading) return;
 
         setIsLoading(true);
         setError(null);
+        setShowShockDropdown(false);
         try {
-            await api.shockRealEstate(simId, -0.3);
+            await api.applyShock(simId, {
+                shock_type: selectedShockType,
+                severity: selectedSeverity,
+                magnitude: -0.3,
+                target: null
+            });
             const state = await api.getState(simId);
             setCurrentSnapshot(state.snapshot);
             setHistory((prev) => [...prev, state.snapshot]);
+            console.log(`✅ Applied ${selectedSeverity} ${selectedShockType}`);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to apply shock");
             console.error("Shock error:", err);
@@ -238,10 +248,19 @@ export default function DashboardPage() {
     };
 
     const handlePolicyChange = async (policies: any) => {
-        if (!userEntity) return;
+        if (!userEntity || !simId) return;
 
+        // Update local state immediately for responsive UI
         setUserEntity((prev) => prev ? { ...prev, policies } : null);
-        console.log("Policies updated:", policies);
+
+        try {
+            // Send policy updates to backend
+            const result = await api.updateAgentPolicy(simId, userEntity.id, policies);
+            console.log("Policies updated on backend:", result);
+        } catch (error) {
+            console.error("Failed to update policies on backend:", error);
+            // TODO: Optionally show error toast to user
+        }
     };
 
     const togglePlayPause = () => {
@@ -275,7 +294,7 @@ export default function DashboardPage() {
         const updatedPolicies = { ...bankPolicies };
 
         if (userNode.risk_appetite !== undefined) {
-            updatedPolicies.riskAppetite = userNode.risk_appetite * 100; // Convert 0-1 to 0-100
+            updatedPolicies.riskAppetite = userNode.risk_appetite; // Already in 0-1 range
         }
 
         return {
@@ -328,14 +347,75 @@ export default function DashboardPage() {
                                 <SkipForward className="w-4 h-4" />
                             </button>
 
-                            <button
-                                onClick={handleShockRealEstate}
-                                disabled={!simId || isLoading || !isUserAlive}
-                                className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 disabled:bg-slate-300 disabled:text-slate-500 text-white rounded-lg transition-all font-semibold shadow-sm"
-                            >
-                                <Zap className="w-4 h-4" />
-                                Apply Shock
-                            </button>
+                            <div className="relative">
+                                <button
+                                    onClick={() => setShowShockDropdown(!showShockDropdown)}
+                                    disabled={!simId || isLoading || !isUserAlive}
+                                    className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 disabled:bg-slate-300 disabled:text-slate-500 text-white rounded-lg transition-all font-semibold shadow-sm"
+                                >
+                                    <Zap className="w-4 h-4" />
+                                    Apply Shock
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </button>
+
+                                {showShockDropdown && simId && !isLoading && isUserAlive && (
+                                    <div className="absolute top-full left-0 mt-2 w-80 bg-white rounded-lg shadow-xl border-2 border-slate-200 z-50 p-4">
+                                        <div className="mb-3">
+                                            <label className="block text-xs font-semibold text-slate-700 mb-2">Sector</label>
+                                            <select
+                                                value={selectedShockType}
+                                                onChange={(e) => setSelectedShockType(e.target.value)}
+                                                className="w-full px-3 py-2 border-2 border-slate-200 rounded-lg text-sm font-medium focus:border-blue-500 focus:outline-none"
+                                            >
+                                                <option value="real_estate_shock">🏘️ Real Estate</option>
+                                                <option value="manufacturing_shock">🏭 Manufacturing</option>
+                                                <option value="agriculture_shock">🌾 Agriculture</option>
+                                                <option value="energy_shock">⚡ Energy</option>
+                                                <option value="export_shock">📦 Export-Oriented</option>
+                                                <option value="services_shock">💼 Services</option>
+                                                <option value="msme_shock">🏪 MSME</option>
+                                                <option value="technology_shock">💻 Technology</option>
+                                                <option value="retail_shock">🛒 Retail Trade</option>
+                                                <option value="infrastructure_shock">🛣️ Infrastructure</option>
+                                                <option value="liquidity_squeeze">💧 Liquidity Squeeze</option>
+                                                <option value="interest_rate_shock">📈 Interest Rate Spike</option>
+                                                <option value="asset_price_crash">📉 Asset Price Crash</option>
+                                            </select>
+                                        </div>
+
+                                        <div className="mb-4">
+                                            <label className="block text-xs font-semibold text-slate-700 mb-2">Severity</label>
+                                            <select
+                                                value={selectedSeverity}
+                                                onChange={(e) => setSelectedSeverity(e.target.value)}
+                                                className="w-full px-3 py-2 border-2 border-slate-200 rounded-lg text-sm font-medium focus:border-blue-500 focus:outline-none"
+                                            >
+                                                <option value="mild">Mild (-10 to -20%)</option>
+                                                <option value="moderate">Moderate (-20 to -40%)</option>
+                                                <option value="severe">Severe (-40 to -60%)</option>
+                                                <option value="crisis">Crisis (-60 to -80%)</option>
+                                            </select>
+                                        </div>
+
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={handleApplyShock}
+                                                className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold text-sm"
+                                            >
+                                                Apply
+                                            </button>
+                                            <button
+                                                onClick={() => setShowShockDropdown(false)}
+                                                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-semibold text-sm"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
 
                             <button
                                 onClick={handleReset}

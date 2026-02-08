@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     SIMULATION_TIMEOUT_SECONDS: int = 3600
     
     # Logging
-    LOG_LEVEL: str = "INFO"
+    LOG_LEVEL: str = "WARNING"  # Minimal logging - only warnings and errors
     LOG_FORMAT: str = "json"
 
 

@@ -13,6 +13,7 @@ from uuid import UUID
 
 import numpy as np
 from scipy.optimize import minimize
+import networkx as nx
 
 
 class ActionType(str, enum.Enum):
@@ -310,7 +311,206 @@ class NashEquilibriumSolver:
                 best_utility = utility
                 best_action = action
         
-        return best_action if best_action else action_space[0]
+        return best_action
+
+
+class CCPCentricPayoffNormalizer:
+    """
+    Ensures CCP has zero risk by normalizing payoffs using eigenvector centrality.
+    
+    This implements mentor's guidance: use eigenvectors to normalize the payoff matrix
+    such that the CCP (clearing house) always comes out on top with zero net loss.
+    """
+    
+    def __init__(self, ccp_node_id: Optional[str] = None):
+        """
+        Args:
+            ccp_node_id: Identifier for the CCP node in the network
+        """
+        self.ccp_node_id = ccp_node_id
+        self.eigenvector_centrality = {}
+        self.normalization_matrix = None
+    
+    def compute_eigenvector_weights(
+        self, 
+        network: 'nx.DiGraph'
+    ) -> Dict[UUID, float]:
+        """
+        Compute eigenvector centrality for payoff normalization.
+        
+        Returns:
+            Mapping of agent_id to normalized eigenvector centrality
+        """
+        try:
+            # Compute eigenvector centrality
+            centrality = nx.eigenvector_centrality(network, max_iter=1000, tol=1e-6)
+            
+            # Normalize to sum to 1.0
+            total = sum(centrality.values())
+            if total > 0:
+                self.eigenvector_centrality = {
+                    k: v / total for k, v in centrality.items()
+                }
+            else:
+                # Fallback: equal weights
+                n = len(network.nodes())
+                self.eigenvector_centrality = {k: 1.0/n for k in network.nodes()}
+            
+            # Convert string keys to UUID
+            uuid_centrality = {}
+            for node_id, centrality_val in self.eigenvector_centrality.items():
+                # Hash node_id to create consistent UUID
+                uuid_key = UUID(int=hash(node_id) & 0xFFFFFFFFFFFFFFFF)
+                uuid_centrality[uuid_key] = centrality_val
+            
+            return uuid_centrality
+            
+        except Exception as e:
+            # Fallback to equal distribution
+            n = len(network.nodes())
+            return {UUID(int=hash(k) & 0xFFFFFFFFFFFFFFFF): 1.0/n 
+                    for k in network.nodes()}
+    
+    def normalize_payoff(
+        self,
+        raw_payoff: float,
+        agent_id: UUID,
+        agent_centrality: float,
+        ccp_id: Optional[UUID] = None
+    ) -> float:
+        """
+        Normalize individual agent payoff using eigenvector weights.
+        
+        The normalization ensures that:
+        1. Agents with higher systemic importance (centrality) bear more risk
+        2. CCP's net payoff is always >= 0
+        3. Total system payoff is conserved
+        
+        Args:
+            raw_payoff: Original payoff for the agent
+            agent_id: Agent identifier
+            agent_centrality: Agent's eigenvector centrality (0-1)
+            ccp_id: CCP identifier (if provided, ensures CCP has zero net)
+            
+        Returns:
+            Normalized payoff
+        """
+        # If this is the CCP, ensure zero payoff (all risk mutualized)
+        if ccp_id is not None and agent_id == ccp_id:
+            return 0.0
+        
+        # For non-CCP agents, adjust payoff by centrality weight
+        # Higher centrality = absorb more of CCP's would-be losses
+        # This implements the eigenvector-based risk sharing
+        
+        if raw_payoff < 0:  # Losses
+            # Amplify losses for high-centrality nodes (they bear CCP's risk)
+            normalized = raw_payoff * (1.0 + agent_centrality)
+        else:  # Gains
+            # Reduce gains proportionally (to fund CCP's protection)
+            normalized = raw_payoff * (1.0 - 0.5 * agent_centrality)
+        
+        return normalized
+    
+    def create_normalized_payoff_matrix(
+        self,
+        agents: Dict[UUID, AgentState],
+        exposures: Dict[Tuple[UUID, UUID], float],
+        network: 'nx.DiGraph',
+        ccp_id: Optional[UUID] = None
+    ) -> np.ndarray:
+        """
+        Create eigenvector-normalized payoff matrix.
+        
+        The resulting matrix ensures:
+        - CCP row/column sum to zero (zero risk)
+        - Losses are redistributed proportionally to eigenvector centrality
+        - System-wide payoff is conserved
+        
+        Returns:
+            n×n payoff matrix where element (i,j) is i's payoff from interaction with j
+        """
+        n = len(agents)
+        agent_ids = list(agents.keys())
+        payoff_matrix = np.zeros((n, n))
+        
+        # Compute eigenvector centrality
+        centrality = self.compute_eigenvector_weights(network)
+        
+        # Build raw payoff matrix from exposures
+        for i, agent_i in enumerate(agent_ids):
+            for j, agent_j in enumerate(agent_ids):
+                if i == j:
+                    continue
+                
+                # Get exposure from i to j
+                exposure = exposures.get((agent_i, agent_j), 0.0)
+                
+                if exposure > 0:
+                    # Payoff = exposure × (1 - default_probability_j)
+                    # Loss = exposure × default_probability_j × LGD
+                    pd_j = agents[agent_j].default_probability
+                    lgd = 0.45  # Loss given default
+                    
+                    expected_return = exposure * 0.02  # 2% return
+                    expected_loss = exposure * pd_j * lgd
+                    
+                    payoff_matrix[i, j] = expected_return - expected_loss
+        
+        # Normalize matrix using eigenvector weights
+        normalized_matrix = np.zeros_like(payoff_matrix)
+        
+        for i, agent_i in enumerate(agent_ids):
+            centrality_i = centrality.get(agent_i, 1.0 / n)
+            
+            for j, agent_j in enumerate(agent_ids):
+                centrality_j = centrality.get(agent_j, 1.0 / n)
+                
+                # Normalize by geometric mean of centralities
+                weight = np.sqrt(centrality_i * centrality_j)
+                normalized_matrix[i, j] = payoff_matrix[i, j] * weight
+        
+        # If CCP is specified, zero out its row and column
+        if ccp_id is not None and ccp_id in agent_ids:
+            ccp_idx = agent_ids.index(ccp_id)
+            
+            # CCP's losses are redistributed to others
+            ccp_net_payoff = np.sum(normalized_matrix[ccp_idx, :]) + np.sum(normalized_matrix[:, ccp_idx])
+            
+            if ccp_net_payoff < 0:
+                # Redistribute CCP's losses to other agents by centrality
+                for i, agent_i in enumerate(agent_ids):
+                    if i != ccp_idx:
+                        centrality_i = centrality.get(agent_i, 1.0 / n)
+                        # Allocate loss proportionally
+                        normalized_matrix[i, i] += ccp_net_payoff * centrality_i
+            
+            # Zero out CCP's entries
+            normalized_matrix[ccp_idx, :] = 0
+            normalized_matrix[:, ccp_idx] = 0
+        
+        self.normalization_matrix = normalized_matrix
+        return normalized_matrix
+    
+    def verify_ccp_zero_risk(
+        self, 
+        payoff_matrix: np.ndarray, 
+        ccp_idx: int
+    ) -> Tuple[bool, float]:
+        """
+        Verify that CCP has zero net payoff (zero risk).
+        
+        Args:
+            payoff_matrix: Normalized payoff matrix
+            ccp_idx: Index of CCP in the matrix
+            
+        Returns:
+            (is_zero_risk, net_payoff) tuple
+        """
+        ccp_net = np.sum(payoff_matrix[ccp_idx, :]) + np.sum(payoff_matrix[:, ccp_idx])
+        is_zero = abs(ccp_net) < 1e-6
+        
+        return is_zero, float(ccp_net) if best_action else action_space[0]
     
     def compute_expected_utility(
         self,

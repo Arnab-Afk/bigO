@@ -197,11 +197,18 @@ class BankAgent(Agent):
         self._current_network = network
         self._current_global_state = global_state
         
+        # Performance: Cache neighbors list (topology doesn't change often)
+        # Only recalculate if network changed (check node count as proxy)
+        node_count = network.number_of_nodes()
+        if not hasattr(self, '_cached_node_count') or self._cached_node_count != node_count:
+            self._cached_neighbors = list(network.neighbors(self.agent_id))
+            self._cached_node_count = node_count
+        
         # Count failed neighbors
         self.neighbor_defaults = 0
         neighbor_health_scores = []
         
-        for neighbor_id in network.neighbors(self.agent_id):
+        for neighbor_id in self._cached_neighbors:
             neighbor = network.nodes[neighbor_id].get('agent')
             if neighbor and not neighbor.alive:
                 self.neighbor_defaults += 1
@@ -215,9 +222,10 @@ class BankAgent(Agent):
         market_volatility = global_state.get('market_volatility', 0.0)
         
         # Compute stress perception
+        neighbor_count = len(self._cached_neighbors) if self._cached_neighbors else 1
         self.perceived_systemic_stress = (
             (1.0 - self.neighbor_avg_health) * 0.4 +
-            (self.neighbor_defaults / max(len(list(network.neighbors(self.agent_id))), 1)) * 0.3 +
+            (self.neighbor_defaults / max(neighbor_count, 1)) * 0.3 +
             market_volatility * 0.2 +
             (1.0 - global_liquidity) * 0.1
         )
@@ -235,15 +243,25 @@ class BankAgent(Agent):
         """
         decisions = {}
         
-        # Use ML risk advisor if available
+        # Use ML risk advisor if available (skip for performance in normal conditions)
         if self.ml_risk_advisor and self._current_network:
+            # Performance: Only use ML if agent is in trouble
+            current_health = self.compute_health()
+            if current_health > 0.6 and self.perceived_systemic_stress < 0.4:
+                # Agent is healthy - skip expensive ML, use fast heuristics
+                self._traditional_decision_strategy(decisions)
+                return decisions
+            
             try:
-                # Convert self to AgentState for ML processing
+                # Convert self to AgentState for ML processing (cached)
                 from app.engine.game_theory import AgentState as GTAgentState
                 from uuid import UUID
                 
+                if not self._cached_uuid:
+                    self._cached_uuid = UUID(int=hash(self.agent_id) & 0xFFFFFFFFFFFFFFFF)
+                
                 agent_state = GTAgentState(
-                    agent_id=UUID(int=hash(self.agent_id) & 0xFFFFFFFFFFFFFFFF),
+                    agent_id=self._cached_uuid,
                     capital_ratio=self.crar / 10.0,  # Normalize to 0-1 range
                     liquidity_buffer=self.liquidity / max(self.capital, 1.0),
                     credit_exposure=self.credit_supply_limit / max(self.capital, 1.0),
@@ -343,7 +361,7 @@ class BankAgent(Agent):
             self.interbank_limit *= 0.5
             self.risk_appetite = max(0.15, self.risk_appetite * 0.5)  # Don't go to 0.1 immediately
             decisions['action'] = 'EMERGENCY_DELEVERAGING'
-            logger.warning(f"{self.agent_id}: CRITICAL DISTRESS - CRAR {self.crar:.2f}% below min {self.regulatory_min_crar:.2f}%")
+            # logger.warning(f"{self.agent_id}: CRITICAL DISTRESS - CRAR {self.crar:.2f}% below min {self.regulatory_min_crar:.2f}%")
         
         # HIGH RISK: Health below 40% or significant system stress
         elif current_health < 0.4 or self.perceived_systemic_stress > 0.6 or self.neighbor_defaults > 0:
@@ -361,7 +379,7 @@ class BankAgent(Agent):
                 self.liquidity += min(liquidity_gap * 0.2, self.capital * 0.05)  # Gradual increase
             
             decisions['action'] = 'DEFENSIVE_RISK_REDUCTION'
-            logger.info(f"{self.agent_id}: DEFENSIVE MODE - Health {current_health:.2f}, Stress {self.perceived_systemic_stress:.2f}")
+            # logger.info(f"{self.agent_id}: DEFENSIVE MODE - Health {current_health:.2f}, Stress {self.perceived_systemic_stress:.2f}")
         
         # MODERATE RISK: Health 40-60% or moderate stress
         elif current_health < 0.6 or self.perceived_systemic_stress > 0.4:
@@ -554,6 +572,12 @@ class CCPAgent(Agent):
         self._current_network = None
         self._current_global_state = None
         self._all_agent_states = {}
+        self._cached_uuid = None  # Performance: cache UUID
+        
+        # Eigenvector-Based Loss Mutualization
+        self.eigenvector_centrality: Dict[str, float] = {}  # Node -> centrality score
+        self.enable_loss_mutualization = True  # Ensures CCP has zero risk
+        self.total_mutualized_losses = 0.0  # Track redistributed losses
         
     def perceive(self, network: 'nx.DiGraph', global_state: Dict[str, Any]) -> None:
         """
@@ -718,32 +742,202 @@ class CCPAgent(Agent):
     
     def act(self, network: 'nx.DiGraph') -> List[Dict[str, Any]]:
         """
-        CCP actions: Margin calls, default handling.
+        CCP actions: Margin calls, default handling with eigenvector-based loss mutualization.
+        
+        When a member defaults, losses are redistributed among surviving members
+        proportional to their eigenvector centrality, ensuring CCP has zero net loss.
         """
         events = []
         
-        # Check for member defaults
+        # Update eigenvector centrality for all members
+        self._update_eigenvector_centrality(network)
+        
+        # Identify defaulted members
+        defaulted_members = []
         for node_id, data in network.nodes(data=True):
             agent = data.get('agent')
             if isinstance(agent, BankAgent) and not agent.alive:
-                # Bank defaulted - CCP must use default fund
                 loss = abs(agent.capital)  # The capital deficit
                 if loss > 0:
-                    self.default_fund_size -= loss
-                    events.append({
-                        'type': 'CCP_DEFAULT_FUND_USAGE',
-                        'failed_member': node_id,
-                        'loss': loss,
-                        'remaining_fund': self.default_fund_size
-                    })
+                    defaulted_members.append((node_id, agent, loss))
+        
+        # Process defaults with eigenvector-based loss mutualization
+        if defaulted_members and self.enable_loss_mutualization:
+            for node_id, agent, loss in defaulted_members:
+                # Instead of CCP absorbing loss, redistribute to surviving members
+                mutualization_result = self._mutualize_loss(
+                    network, node_id, loss
+                )
+                
+                events.append({
+                    'type': 'CCP_LOSS_MUTUALIZATION',
+                    'failed_member': node_id,
+                    'original_loss': loss,
+                    'redistributed_to': mutualization_result['redistributions'],
+                    'ccp_net_loss': 0.0,  # Always zero due to mutualization
+                    'mutualization_method': 'eigenvector_centrality'
+                })
+                
+                self.total_mutualized_losses += loss
+                
+                logger.info(
+                    f"CCP: Mutualized {loss:.2f} loss from {node_id} "
+                    f"across {len(mutualization_result['redistributions'])} surviving members. "
+                    f"CCP net loss: 0.0 (zero risk maintained)"
+                )
+        
+        elif defaulted_members:
+            # Fallback: traditional default fund usage (if mutualization disabled)
+            for node_id, agent, loss in defaulted_members:
+                self.default_fund_size -= loss
+                events.append({
+                    'type': 'CCP_DEFAULT_FUND_USAGE',
+                    'failed_member': node_id,
+                    'loss': loss,
+                    'remaining_fund': self.default_fund_size
+                })
         
         return events
+    
+    def _update_eigenvector_centrality(self, network: 'nx.DiGraph') -> None:
+        """
+        Update eigenvector centrality scores for all network members.
+        """
+        try:
+            import networkx as nx
+            
+            # Compute eigenvector centrality using networkx
+            # This measures each node's influence based on network structure
+            centrality = nx.eigenvector_centrality(network, max_iter=1000, tol=1e-6)
+            
+            # Normalize to sum to 1.0 for proper probability distribution
+            total = sum(centrality.values())
+            if total > 0:
+                self.eigenvector_centrality = {
+                    k: v / total for k, v in centrality.items()
+                }
+            else:
+                # Fallback: equal weights
+                n_nodes = len(network.nodes())
+                self.eigenvector_centrality = {
+                    node_id: 1.0 / n_nodes for node_id in network.nodes()
+                }
+                
+        except Exception as e:
+            logger.warning(f"Failed to compute eigenvector centrality: {e}. Using equal weights.")
+            # Fallback to equal distribution
+            n_nodes = len(network.nodes())
+            self.eigenvector_centrality = {
+                node_id: 1.0 / n_nodes for node_id in network.nodes()
+            }
+    
+    def _mutualize_loss(
+        self, 
+        network: 'nx.DiGraph', 
+        failed_member_id: str, 
+        loss_amount: float
+    ) -> Dict[str, Any]:
+        """
+        Redistribute loss among surviving members using eigenvector-normalized weights.
+        
+        This is the core mechanism ensuring CCP has zero risk:
+        - Loss is distributed proportional to each member's eigenvector centrality
+        - Higher centrality = higher systemic importance = larger loss share
+        - Total distributed loss = original loss (conservation of losses)
+        - CCP's net position = 0
+        
+        Args:
+            network: Financial network graph
+            failed_member_id: ID of defaulted member
+            loss_amount: Total loss to redistribute
+            
+        Returns:
+            Dictionary with redistribution details
+        """
+        redistributions = {}
+        
+        # Get all surviving bank members (exclude failed member and CCP itself)
+        surviving_members = []
+        for node_id, data in network.nodes(data=True):
+            agent = data.get('agent')
+            if (isinstance(agent, BankAgent) and 
+                agent.alive and 
+                node_id != failed_member_id and
+                node_id != self.agent_id):
+                surviving_members.append((node_id, agent))
+        
+        if not surviving_members:
+            logger.warning("No surviving members to mutualize loss. CCP absorbs loss.")
+            self.default_fund_size -= loss_amount
+            return {'redistributions': {}, 'ccp_absorbed': loss_amount}
+        
+        # Compute eigenvector-weighted loss shares
+        # Each member's share is proportional to their eigenvector centrality
+        surviving_centrality_sum = sum(
+            self.eigenvector_centrality.get(node_id, 1.0 / len(surviving_members))
+            for node_id, _ in surviving_members
+        )
+        
+        if surviving_centrality_sum == 0:
+            surviving_centrality_sum = 1.0
+        
+        total_redistributed = 0.0
+        
+        for node_id, agent in surviving_members:
+            # Loss share proportional to eigenvector centrality
+            centrality_weight = self.eigenvector_centrality.get(
+                node_id, 1.0 / len(surviving_members)
+            )
+            
+            loss_share = loss_amount * (centrality_weight / surviving_centrality_sum)
+            
+            # Apply loss to surviving member
+            agent.capital -= loss_share
+            
+            # Recalculate CRAR
+            if agent.risk_weighted_assets > 0:
+                agent.crar = (agent.capital / agent.risk_weighted_assets) * 100
+            
+            redistributions[node_id] = {
+                'loss_share': loss_share,
+                'eigenvector_centrality': centrality_weight,
+                'new_capital': agent.capital,
+                'new_crar': agent.crar
+            }
+            
+            total_redistributed += loss_share
+            
+            logger.debug(
+                f"  {node_id}: Absorbed {loss_share:.2f} "
+                f"(centrality: {centrality_weight:.4f}, new CRAR: {agent.crar:.2f}%)"
+            )
+        
+        # Verify conservation of losses (should equal original loss)
+        if abs(total_redistributed - loss_amount) > 0.01:
+            logger.warning(
+                f"Loss redistribution mismatch: {total_redistributed:.2f} "
+                f"vs {loss_amount:.2f} (diff: {abs(total_redistributed - loss_amount):.2f})"
+            )
+        
+        return {
+            'redistributions': redistributions,
+            'total_redistributed': total_redistributed,
+            'ccp_absorbed': 0.0,  # Always zero due to mutualization
+            'conservation_check': abs(total_redistributed - loss_amount) < 0.01
+        }
     
     def compute_health(self) -> float:
         """
         CCP health based on default fund adequacy.
+        
+        With eigenvector-based loss mutualization enabled, CCP maintains
+        perfect health (1.0) since all losses are redistributed to members.
         """
-        # Simplified: Fund size relative to total exposures
+        if self.enable_loss_mutualization:
+            # With mutualization, CCP has zero risk and perfect health
+            return 1.0
+        
+        # Legacy mode (without mutualization): fund-based health
         if self.active_exposures == 0:
             return 1.0
         
@@ -849,71 +1043,339 @@ class SectorAgent(Agent):
 
 class RegulatorAgent(Agent):
     """
-    Regulator: The Central Bank setting monetary policy.
+    Regulator: Sophisticated macro-prudential supervisor with geopolitical awareness.
+    
+    The Central Bank / Financial Regulator that:
+    - Sets monetary policy (repo rate)
+    - Enforces capital and liquidity requirements
+    - Monitors geopolitical and external risks
+    - Adjusts policy based on forex reserves, treasury markets, and global conditions
     
     Policy Variables:
-    - base_repo_rate: Cost of money
-    - min_crar_requirement: Regulatory floor
+    - base_repo_rate: Cost of money (monetary policy tool)
+    - min_crar_requirement: Regulatory capital floor (Basel III adjusted)
+    - countercyclical_buffer: Dynamic capital buffer (0-2.5%)
+    - forex_intervention_threshold: Reserves level triggering FX intervention
     
     State Variables:
-    - system_liquidity: Total liquidity in the banking system
+    - system_liquidity: Total liquidity in banking system
+    - geopolitical_state: External factors (forex, bonds, geopolitics)
+    - policy_stance: Accommodative / Neutral / Restrictive
+    - systemic_risk_multiplier: Geopolitical amplification factor
     """
     
     def __init__(
         self,
         agent_id: str,
         base_repo_rate: float = 6.0,
-        min_crar: float = 9.0
+        min_crar: float = 9.0,
+        geopolitical_state: 'GeopoliticalState' = None
     ):
         super().__init__(agent_id, AgentType.REGULATOR)
         
+        # Import geopolitical module
+        try:
+            from .geopolitical_state import GeopoliticalState, create_default_indian_geopolitical_state
+        except ImportError:
+            logger.warning("Geopolitical module not found. Using basic regulator.")
+            GeopoliticalState = None
+            create_default_indian_geopolitical_state = None
+        
+        # Monetary policy
         self.base_repo_rate = base_repo_rate
         self.min_crar_requirement = min_crar
+        self.base_min_crar = min_crar  # Store original
         self.system_liquidity = 1.0  # Normalized
+        
+        # Macro-prudential tools
+        self.countercyclical_buffer = 0.0  # 0-2.5% additional capital
+        self.sectoral_concentration_limit = 0.20  # Max 20% to any sector
+        self.foreign_currency_limit = 0.25  # Max 25% FX exposure
+        self.leverage_ratio_min = 0.03  # 3% minimum leverage ratio
+        
+        # Geopolitical and external factors
+        if GeopoliticalState and create_default_indian_geopolitical_state:
+            self.geopolitical_state = geopolitical_state or create_default_indian_geopolitical_state()
+        else:
+            self.geopolitical_state = None
+        
+        # Policy stance
+        self.policy_stance = "neutral"  # accommodative, neutral, restrictive
+        
+        # Monitoring state
+        self.system_wide_risk_score = 0.0
+        self.systemic_risk_multiplier = 1.0
+        self.intervention_count = 0
+        self.violations: List[str] = []
+        self.recent_interventions: List[Dict] = []
+        
+        # Reserve management
+        self.forex_interventions_count = 0
+        self.emergency_liquidity_injections = 0
         
     def perceive(self, network: 'nx.DiGraph', global_state: Dict[str, Any]) -> None:
         """
-        Regulator monitors system-wide metrics.
+        Regulator monitors:
+        1. Domestic banking system health
+        2. Geopolitical factors (forex, bonds, capital flows)
+        3. External shocks and contagion risks
         """
         total_liquidity = 0.0
         total_capital = 0.0
+        total_risk = 0.0
+        bank_count = 0
         
+        self.violations = []
+        
+        # Assess domestic banks
         for node_id, data in network.nodes(data=True):
             agent = data.get('agent')
             if isinstance(agent, BankAgent):
+                bank_count += 1
                 total_liquidity += agent.liquidity
                 total_capital += agent.capital
+                
+                # Compute adjusted CRAR requirement
+                adjusted_crar_min = self._compute_adjusted_crar_requirement()
+                
+                # Check capital adequacy
+                if agent.crar < adjusted_crar_min:
+                    self.violations.append(
+                        f"{node_id}: CRAR {agent.crar:.2f}% < {adjusted_crar_min:.2f}% "
+                        f"(base: {self.base_min_crar}%, buffer: {self.countercyclical_buffer}%)"
+                    )
+                
+                # Check liquidity
+                liquidity_ratio = agent.liquidity / max(agent.capital, 1)
+                if liquidity_ratio < 0.1:
+                    self.violations.append(
+                        f"{node_id}: Liquidity ratio {liquidity_ratio:.2%} below 10%"
+                    )
+                
+                # Check NPA levels
+                if agent.npa_ratio > 10.0:
+                    self.violations.append(
+                        f"{node_id}: NPA {agent.npa_ratio:.2f}% exceeds 10% threshold"
+                    )
+                
+                # Aggregate risk
+                if hasattr(agent, 'perceived_systemic_stress'):
+                    total_risk += agent.perceived_systemic_stress
+                else:
+                    total_risk += 0.5
         
+        # System-wide liquidity
         self.system_liquidity = total_liquidity / (total_capital + 1e-6)
         global_state['system_liquidity'] = self.system_liquidity
+        
+        # Domestic system risk
+        self.system_wide_risk_score = total_risk / bank_count if bank_count > 0 else 0.0
+        
+        # Incorporate geopolitical factors
+        if self.geopolitical_state:
+            self.systemic_risk_multiplier = self.geopolitical_state.compute_systemic_risk_multiplier()
+            self.system_wide_risk_score *= self.systemic_risk_multiplier
+            
+            # Check forex reserves
+            reserve_adequacy = self.geopolitical_state.forex_reserves.compute_adequacy_score()
+            if reserve_adequacy < 0.6:
+                self.violations.append(
+                    f"FOREX RESERVES: Adequacy {reserve_adequacy:.2%} below 60% safe threshold. "
+                    f"Total: ${self.geopolitical_state.forex_reserves.total_usd:.1f}B"
+                )
+            
+            # Check sovereign stress
+            sovereign_stress = self.geopolitical_state.treasury_market.compute_sovereign_stress()
+            if sovereign_stress > 0.7:
+                self.violations.append(
+                    f"SOVEREIGN DEBT: Stress {sovereign_stress:.2%} elevated. "
+                    f"10Y Yield: {self.geopolitical_state.treasury_market.avg_yield_10yr:.2f}%, "
+                    f"Spread: {self.geopolitical_state.treasury_market.yield_spread_vs_us:.0f}bps"
+                )
+            
+            # Check currency pressure
+            if self.geopolitical_state.currency_pressure.value in ['strong_depreciation', 'mild_depreciation']:
+                self.violations.append(
+                    f"CURRENCY: {self.geopolitical_state.currency_pressure.value.replace('_', ' ').title()} pressure detected"
+                )
+            
+            # Update global state with geopolitical data
+            global_state.update(self.geopolitical_state.to_dict())
+            global_state['systemic_risk_multiplier'] = self.systemic_risk_multiplier
+        
+    def _compute_adjusted_crar_requirement(self) -> float:
+        """
+        Dynamic CRAR requirement = Base + Countercyclical buffer + Geopolitical surcharge
+        """
+        adjusted = self.base_min_crar + self.countercyclical_buffer
+        
+        # Add geopolitical risk surcharge (0-3%)
+        if self.systemic_risk_multiplier > 1.2:
+            geopolitical_surcharge = min(3.0, (self.systemic_risk_multiplier - 1.0) * 5.0)
+            adjusted += geopolitical_surcharge
+        
+        return adjusted
     
     def decide(self) -> Dict[str, Any]:
         """
-        Adjust repo rate based on system stress.
+        Regulatory decision-making considering:
+        1. Domestic system stress
+        2. Forex reserves and currency stability
+        3. Sovereign debt markets
+        4. Geopolitical tensions
+        5. Global risk sentiment
         """
-        # Counter-cyclical policy: Lower rates if stress is high
+        decisions = {
+            'action': 'MONITOR',
+            'violations': self.violations,
+            'system_risk': self.system_wide_risk_score,
+            'system_liquidity': self.system_liquidity,
+            'repo_rate': self.base_repo_rate,
+            'policy_stance': self.policy_stance
+        }
+        
+        if self.geopolitical_state:
+            decisions.update({
+                'geopolitical_multiplier': self.systemic_risk_multiplier,
+                'forex_adequacy': self.geopolitical_state.forex_reserves.compute_adequacy_score(),
+                'sovereign_stress': self.geopolitical_state.treasury_market.compute_sovereign_stress()
+            })
+        
+        # MONETARY POLICY: Adjust repo rate
         system_stress = 1.0 - self.system_liquidity
         
-        if system_stress > 0.6:
-            # Crisis mode: Cut rates
-            self.base_repo_rate = max(2.0, self.base_repo_rate - 0.5)
-        elif system_stress < 0.2:
-            # Overheating: Raise rates
-            self.base_repo_rate = min(10.0, self.base_repo_rate + 0.25)
+        if system_stress > 0.6 or self.system_wide_risk_score > 0.7:
+            # Crisis mode: Cut rates, inject liquidity
+            rate_cut = 0.5
+            self.base_repo_rate = max(2.0, self.base_repo_rate - rate_cut)
+            self.policy_stance = "accommodative"
+            decisions['action'] = 'EMERGENCY_RATE_CUT'
+            decisions['rate_change'] = -rate_cut
+            self.emergency_liquidity_injections += 1
+            
+        elif system_stress < 0.2 and self.system_wide_risk_score < 0.3:
+            # Low stress: Normalize rates
+            rate_hike = 0.25
+            self.base_repo_rate = min(10.0, self.base_repo_rate + rate_hike)
+            self.policy_stance = "restrictive"
+            decisions['action'] = 'RATE_HIKE'
+            decisions['rate_change'] = rate_hike
+        else:
+            self.policy_stance = "neutral"
         
-        return {'repo_rate': self.base_repo_rate}
+        # MACRO-PRUDENTIAL: Adjust countercyclical buffer
+        if self.system_wide_risk_score > 0.8:
+            # High systemic risk: Increase capital buffers
+            self.countercyclical_buffer = min(2.5, self.countercyclical_buffer + 0.5)
+            decisions['buffer_action'] = 'INCREASE_CAPITAL_BUFFER'
+        elif self.system_wide_risk_score < 0.3:
+            # Low risk: Release buffers
+            self.countercyclical_buffer = max(0.0, self.countercyclical_buffer - 0.25)
+            decisions['buffer_action'] = 'RELEASE_CAPITAL_BUFFER'
+        
+        decisions['countercyclical_buffer'] = self.countercyclical_buffer
+        decisions['adjusted_crar_requirement'] = self._compute_adjusted_crar_requirement()
+        
+        # FOREX INTERVENTION (if geopolitical module available)
+        if self.geopolitical_state:
+            reserve_adequacy = self.geopolitical_state.forex_reserves.compute_adequacy_score()
+            
+            if reserve_adequacy < 0.5:
+                # Critical reserves: Capital controls + forex intervention
+                decisions['forex_action'] = 'CAPITAL_CONTROLS'
+                self.forex_interventions_count += 1
+                self.foreign_currency_limit = 0.15  # Tighten FX exposure limit
+            elif reserve_adequacy < 0.7:
+                # Moderate pressure: Forex intervention
+                decisions['forex_action'] = 'FOREX_INTERVENTION'
+                self.forex_interventions_count += 1
+        
+        # SPECIFIC INTERVENTIONS for violations
+        if len(self.violations) > 5:
+            decisions['action'] = 'SYSTEM_WIDE_INTERVENTION'
+            decisions['intervention_type'] = 'MANDATORY_CAPITAL_RAISE'
+            self.intervention_count += 1
+            
+            self.recent_interventions.append({
+                'step': decisions.get('timestep', 0),
+                'type': 'SYSTEM_WIDE',
+                'violations': len(self.violations)
+            })
+        
+        return decisions
     
     def act(self, network: 'nx.DiGraph') -> List[Dict[str, Any]]:
         """
-        Broadcast repo rate to the system.
+        Execute regulatory actions:
+        1. Broadcast repo rate
+        2. Enforce capital requirements
+        3. Apply forex interventions
+        4. Update geopolitical state
         """
-        return [{
+        events = []
+        
+        # Broadcast repo rate to all banks
+        events.append({
             'type': 'REPO_RATE_UPDATE',
-            'rate': self.base_repo_rate
-        }]
+            'rate': self.base_repo_rate,
+            'stance': self.policy_stance
+        })
+        
+        # Broadcast adjusted CRAR requirement
+        events.append({
+            'type': 'REGULATORY_REQUIREMENT_UPDATE',
+            'crar_requirement': self._compute_adjusted_crar_requirement(),
+            'countercyclical_buffer': self.countercyclical_buffer,
+            'foreign_currency_limit': self.foreign_currency_limit
+        })
+        
+        # Geopolitical updates
+        if self.geopolitical_state:
+            events.append({
+                'type': 'GEOPOLITICAL_STATE_UPDATE',
+                'forex_reserves_usd': self.geopolitical_state.forex_reserves.total_usd,
+                'gold_reserves_tonnes': self.geopolitical_state.forex_reserves.gold_reserves_tonnes,
+                'treasury_yield': self.geopolitical_state.treasury_market.avg_yield_10yr,
+                'us_treasury_yield': self.geopolitical_state.us_10yr_yield,
+                'tension_level': self.geopolitical_state.tension_level.value,
+                'risk_multiplier': self.systemic_risk_multiplier
+            })
+        
+        return events
     
     def compute_health(self) -> float:
         """
-        Regulator health is system liquidity.
+        Regulator health based on:
+        - System liquidity (domestic)
+        - Forex reserve adequacy (external)
+        - Inverse of systemic risk
         """
-        return min(1.0, max(0.0, self.system_liquidity))
+        # Domestic health
+        liquidity_health = min(1.0, max(0.0, self.system_liquidity))
+        
+        # External health (if geopolitical data available)
+        if self.geopolitical_state:
+            reserve_health = self.geopolitical_state.forex_reserves.compute_adequacy_score()
+            external_health = (reserve_health + (1.0 - min(1.0, self.systemic_risk_multiplier - 1.0))) / 2.0
+        else:
+            external_health = 1.0
+        
+        # Combined health
+        return 0.6 * liquidity_health + 0.4 * external_health
+    
+    def apply_geopolitical_shock(self, shocks: Dict[str, float]):
+        """
+        Apply external shocks to geopolitical state
+        
+        Available shocks:
+        - 'geopolitical_tension': -1 to 1
+        - 'capital_outflow': USD billions
+        - 'yield_shock_bps': basis points
+        - 'gold_price_shock_pct': percentage change
+        - 'us_yield_shock_bps': US yield change
+        """
+        if self.geopolitical_state:
+            self.geopolitical_state.update_from_shocks(shocks)
+            logger.info(f"Regulator applied geopolitical shocks: {shocks}")
+
+

@@ -46,11 +46,11 @@ def setup_logging() -> None:
         cache_logger_on_first_use=True,
     )
     
-    # Configure standard library logging
+    # Configure standard library logging - use same level as structlog
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
-        level=getattr(logging, settings.LOG_LEVEL),
+        level=getattr(logging, settings.LOG_LEVEL),  # Consistent with structlog
     )
 
 

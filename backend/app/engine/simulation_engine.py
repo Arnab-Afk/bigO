@@ -21,16 +21,35 @@ from .agents import (
     Agent, BankAgent, CCPAgent, SectorAgent, RegulatorAgent,
     AgentType, AgentMode
 )
+from .sector_shocks import (
+    SectorType, ShockSeverity, SectorState, SectorShockScenario,
+    create_default_sector_states, get_shock_scenario,
+    compute_bank_loss_from_sector_shock, SECTOR_SHOCK_LIBRARY
+)
 
 logger = logging.getLogger(__name__)
 
 
 class ShockType(Enum):
     """Types of exogenous shocks"""
+    # Legacy shocks (kept for backward compatibility)
     SECTOR_CRISIS = "sector_crisis"
     LIQUIDITY_SQUEEZE = "liquidity_squeeze"
     INTEREST_RATE_SHOCK = "interest_rate_shock"
     ASSET_PRICE_CRASH = "asset_price_crash"
+    
+    # New sector-specific shocks
+    REAL_ESTATE_SHOCK = "real_estate_shock"
+    INFRASTRUCTURE_SHOCK = "infrastructure_shock"
+    MANUFACTURING_SHOCK = "manufacturing_shock"
+    AGRICULTURE_SHOCK = "agriculture_shock"
+    ENERGY_SHOCK = "energy_shock"
+    EXPORT_SHOCK = "export_shock"
+    SERVICES_SHOCK = "services_shock"
+    MSME_SHOCK = "msme_shock"
+    TECHNOLOGY_SHOCK = "technology_shock"
+    RETAIL_SHOCK = "retail_shock"
+    
     NONE = "none"
 
 
@@ -94,6 +113,10 @@ class FinancialEcosystem:
         self.history: List[SimulationSnapshot] = []
         self.agents: Dict[str, Agent] = {}
         
+        # Initialize sector states for multi-sector shock tracking
+        self.sector_states: Dict[SectorType, SectorState] = create_default_sector_states()
+        # logger.info(f"Initialized {len(self.sector_states)} sector states for shock simulation")
+        
         # Initialize ML risk advisor
         from app.ml.risk_mitigation import initialize_risk_advisor
         from app.ml.inference.predictor import DefaultPredictor
@@ -113,17 +136,17 @@ class FinancialEcosystem:
                     default_predictor=default_predictor,
                     risk_aversion=0.3,  # Lower risk aversion for stability
                 )
-                logger.info("ML risk advisor initialized with trained model")
+                # logger.info("ML risk advisor initialized with trained model")
             elif enable_ml:
                 # Use advisor without ML model (uses heuristics)
                 self.ml_risk_advisor = initialize_risk_advisor(
                     default_predictor=None,
                     risk_aversion=0.3,  # Lower risk aversion
                 )
-                logger.info("ML risk advisor initialized with heuristic fallback")
+                # logger.info("ML risk advisor initialized with heuristic fallback")
             else:
                 self.ml_risk_advisor = None
-                logger.info("ML risk advisor DISABLED - using traditional strategy")
+                # logger.info("ML risk advisor DISABLED - using traditional strategy")
         except Exception as e:
             logger.warning(f"Failed to initialize ML risk advisor: {e}")
             self.ml_risk_advisor = None
@@ -132,7 +155,7 @@ class FinancialEcosystem:
         if config.random_seed:
             np.random.seed(config.random_seed)
         
-        logger.info(f"FinancialEcosystem initialized with config: {config}")
+        # logger.info(f"FinancialEcosystem initialized with config: {config}")
     
     def add_agent(self, agent: Agent) -> None:
         """
@@ -151,7 +174,7 @@ class FinancialEcosystem:
         if self.ml_risk_advisor:
             if isinstance(agent, (BankAgent, CCPAgent)):
                 agent.ml_risk_advisor = self.ml_risk_advisor
-                logger.debug(f"Injected ML risk advisor into {agent.agent_id}")
+                # logger.debug(f"Injected ML risk advisor into {agent.agent_id}")
         
         # Auto-connect RBI/Regulator to all banks
         if isinstance(agent, RegulatorAgent):
@@ -159,14 +182,14 @@ class FinancialEcosystem:
             for agent_id, a in self.agents.items():
                 if isinstance(a, BankAgent) and agent_id != agent.agent_id:
                     self.network.add_edge(agent.agent_id, agent_id, weight=0, type='regulatory')
-                    logger.debug(f"Connected regulator {agent.agent_id} to {agent_id}")
+                    # logger.debug(f"Connected regulator {agent.agent_id} to {agent_id}")
         
         # If adding a bank and regulator exists, connect them
         if isinstance(agent, BankAgent):
             for a in self.agents.values():
                 if isinstance(a, RegulatorAgent):
                     self.network.add_edge(a.agent_id, agent.agent_id, weight=0, type='regulatory')
-                    logger.debug(f"Connected bank {agent.agent_id} to regulator {a.agent_id}")
+                    # logger.debug(f"Connected bank {agent.agent_id} to regulator {a.agent_id}")
         
         # Auto-connect CCP to all banks (bidirectional clearing relationships)
         if isinstance(agent, CCPAgent):
@@ -177,7 +200,7 @@ class FinancialEcosystem:
                     self.network.add_edge(agent_id, agent.agent_id, weight=clearing_amount, type='clearing')
                     # CCP to Bank (potential default fund claims)
                     self.network.add_edge(agent.agent_id, agent_id, weight=0, type='clearing_reciprocal')
-                    logger.debug(f"Connected CCP {agent.agent_id} to {agent_id}")
+                    # logger.debug(f"Connected CCP {agent.agent_id} to {agent_id}")
         
         # If adding a bank and CCP exists, connect them
         if isinstance(agent, BankAgent):
@@ -187,9 +210,9 @@ class FinancialEcosystem:
                     self.network.add_edge(agent.agent_id, a.agent_id, weight=clearing_amount, type='clearing')
                     self.network.add_edge(a.agent_id, agent.agent_id, weight=0, type='clearing_reciprocal')
                     a.active_exposures += clearing_amount
-                    logger.debug(f"Connected bank {agent.agent_id} to CCP {a.agent_id}")
+                    # logger.debug(f"Connected bank {agent.agent_id} to CCP {a.agent_id}")
         
-        logger.info(f"Added {agent.agent_type.value} agent: {agent.agent_id}")
+        # logger.info(f"Added {agent.agent_type.value} agent: {agent.agent_id}")
     
     def add_exposure(
         self,
@@ -215,14 +238,21 @@ class FinancialEcosystem:
         )
         logger.debug(f"Added exposure: {creditor_id} -> {debtor_id} = {exposure_amount}")
     
-    def apply_shock(self, shock_type: ShockType, target: Optional[str] = None, magnitude: float = -0.2) -> Dict[str, Any]:
+    def apply_shock(
+        self,
+        shock_type: ShockType,
+        target: Optional[str] = None,
+        magnitude: float = -0.2,
+        severity: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
-        Apply an exogenous shock to the system.
+        Apply an exogenous shock to the system using new multi-sector framework.
         
         Args:
             shock_type: Type of shock
             target: Target agent/sector ID (if applicable)
-            magnitude: Shock magnitude (typically negative for crisis)
+            magnitude: Shock magnitude (for legacy shocks, typically negative)
+            severity: Shock severity for new sector shocks ("mild", "moderate", "severe", "crisis")
         
         Returns:
             Dict describing the shock event
@@ -231,9 +261,90 @@ class FinancialEcosystem:
             'type': 'EXOGENOUS_SHOCK',
             'shock_type': shock_type.value,
             'timestep': self.timestep,
-            'magnitude': magnitude
+            'magnitude': magnitude,
+            'severity': severity
         }
         
+        # Map shock types to sectors
+        shock_to_sector_map = {
+            ShockType.REAL_ESTATE_SHOCK: SectorType.REAL_ESTATE,
+            ShockType.INFRASTRUCTURE_SHOCK: SectorType.INFRASTRUCTURE,
+            ShockType.MANUFACTURING_SHOCK: SectorType.MANUFACTURING,
+            ShockType.AGRICULTURE_SHOCK: SectorType.AGRICULTURE,
+            ShockType.ENERGY_SHOCK: SectorType.ENERGY,
+            ShockType.EXPORT_SHOCK: SectorType.EXPORT_ORIENTED,
+            ShockType.SERVICES_SHOCK: SectorType.SERVICES,
+            ShockType.MSME_SHOCK: SectorType.MSME,
+            ShockType.TECHNOLOGY_SHOCK: SectorType.TECHNOLOGY,
+            ShockType.RETAIL_SHOCK: SectorType.RETAIL_TRADE,
+        }
+        
+        # Handle new sector-specific shocks
+        if shock_type in shock_to_sector_map:
+            sector_type = shock_to_sector_map[shock_type]
+            shock_severity = ShockSeverity(severity) if severity else ShockSeverity.MODERATE
+            
+            # Get pre-defined shock scenario
+            scenario = get_shock_scenario(sector_type, shock_severity)
+            if scenario:
+                # Apply shock to sector state
+                sector_state = self.sector_states[sector_type]
+                changes = sector_state.apply_shock(scenario)
+                
+                shock_event.update({
+                    'sector': sector_type.value,
+                    'trigger_event': scenario.trigger_event,
+                    'indicator_changes': changes,
+                    'sector_health': sector_state.indicators.economic_health,
+                    'affected_banks': []
+                })
+                
+                # Propagate to banks based on exposure
+                total_losses = 0.0
+                for agent in self.agents.values():
+                    if isinstance(agent, BankAgent) and agent.alive:
+                        # Assume banks have sector exposures (simplified)
+                        # In real implementation, exposures would be tracked
+                        bank_exposure = agent.risk_weighted_assets * 0.10  # Assume 10% exposure to shocked sector
+                        
+                        loss = compute_bank_loss_from_sector_shock(
+                            sector_state,
+                            bank_exposure,
+                            agent.risk_weighted_assets
+                        )
+                        
+                        if loss > 0:
+                            agent.apply_shock(loss, source=f"sector_{sector_type.value}")
+                            shock_event['affected_banks'].append({
+                                'bank_id': agent.agent_id,
+                                'loss': loss,
+                                'exposure': bank_exposure
+                            })
+                            total_losses += loss
+                
+                shock_event['total_bank_losses'] = total_losses
+                
+                # Apply spillover to correlated sectors
+                for correlated_sector in scenario.correlated_sectors:
+                    spillover_state = self.sector_states[correlated_sector]
+                    spillover_impact = scenario.spillover_intensity * 0.5
+                    
+                    spillover_state.indicators.demand_index *= (1.0 - spillover_impact * 0.3)
+                    spillover_state.indicators.business_confidence *= (1.0 - spillover_impact * 0.4)
+                    spillover_state.indicators.economic_health = spillover_state.indicators.compute_overall_health()
+                
+                # Only log severe shocks
+                if scenario.severity in [ShockSeverity.SEVERE, ShockSeverity.CRISIS]:
+                    logger.warning(
+                    f"SHOCK: {scenario.trigger_event} | "
+                    f"Sector: {sector_type.value} | "
+                    f"Health: {sector_state.indicators.economic_health:.2%} | "
+                    f"Bank losses: ${total_losses:,.0f}"
+                )
+                
+                return shock_event
+        
+        # Handle legacy shocks (backward compatibility)
         if shock_type == ShockType.SECTOR_CRISIS:
             if target and target in self.agents:
                 agent = self.agents[target]
@@ -288,7 +399,7 @@ class FinancialEcosystem:
         9. Update global metrics
         10. Record snapshot
         """
-        logger.info(f"========== TIMESTEP {self.timestep} ==========")
+        # logger.info(f"========== TIMESTEP {self.timestep} ==========")
         
         all_events: List[Dict[str, Any]] = []
         
@@ -362,9 +473,9 @@ class FinancialEcosystem:
             bank_count = len([a for a in self.agents.values() if isinstance(a, BankAgent)])
             new_bank_id = f"BANK_{bank_count + 1}"
             
-            # Create new bank with randomized but reasonable parameters
-            capital = np.random.uniform(500, 2000)
-            rwa = capital * np.random.uniform(8, 15)
+            # Create new bank with realistic capital values (₹500K - ₹2M range)
+            capital = np.random.uniform(500_000, 2_000_000)
+            rwa = capital * np.random.uniform(8.0, 15.0)
             
             new_bank = BankAgent(
                 agent_id=new_bank_id,
@@ -408,7 +519,7 @@ class FinancialEcosystem:
                 'timestep': self.timestep
             })
             
-            logger.info(f"NEW NODE: {new_bank_id} created with capital {capital:.2f}")
+            # logger.info(f"NEW NODE: {new_bank_id} created with capital {capital:.2f}")
         
         return events
     
@@ -468,7 +579,7 @@ class FinancialEcosystem:
                             'timestep': self.timestep
                         })
                         
-                        logger.info(f"NEW LOAN: {bank.agent_id} -> {borrower.agent_id}: {loan_amount:.2f}")
+                        # logger.info(f"NEW LOAN: {bank.agent_id} -> {borrower.agent_id}: {loan_amount:.2f}")
         
         return events
     
@@ -511,7 +622,9 @@ class FinancialEcosystem:
                             'new_capital': creditor.capital
                         })
                         
-                        logger.warning(f"CONTAGION: {creditor_id} lost {loss:.2f} from {failed_bank.agent_id} default")
+                        # Only log significant contagion events (>10% capital loss)
+                        if loss > creditor.capital * 0.1:
+                            logger.warning(f"CONTAGION: {creditor_id} lost {loss:.2f} from {failed_bank.agent_id} default")
         
         return contagion_events
     
@@ -639,7 +752,7 @@ class FinancialEcosystem:
             List of snapshots for each timestep
         """
         steps = steps or self.config.max_timesteps
-        logger.info(f"Starting simulation run for {steps} steps")
+        # logger.info(f"Starting simulation run for {steps} steps")
         
         snapshots = []
         for _ in range(steps):
@@ -654,7 +767,7 @@ class FinancialEcosystem:
             snapshot = self.step()
             snapshots.append(snapshot)
         
-        logger.info(f"Simulation completed. Final timestep: {self.timestep}")
+        # logger.info(f"Simulation completed. Final timestep: {self.timestep}")
         return snapshots
     
     def get_agent(self, agent_id: str) -> Optional[Agent]:
@@ -694,7 +807,7 @@ class FinancialEcosystem:
             with open(filepath, 'w') as f:
                 json.dump(data, f, indent=2)
         
-        logger.info(f"Network exported to {filepath} ({format} format)")
+        # logger.info(f"Network exported to {filepath} ({format} format)")
     
     def reset(self) -> None:
         """
@@ -718,7 +831,7 @@ class FinancialEcosystem:
             'base_repo_rate': 6.0
         }
         
-        logger.info("Simulation reset to initial state")
+        # logger.info("Simulation reset to initial state")
 
 
 class SimulationFactory:
@@ -733,19 +846,24 @@ class SimulationFactory:
         """
         sim = FinancialEcosystem(config)
         
-        # Randomize number of banks (75-125 for much richer network - 5x increase)
-        num_banks = np.random.randint(75, 126)
+        # Randomize number of banks (15-25 for better performance)
+        num_banks = np.random.randint(15, 26)
         
-        # Add banks with randomized parameters
+        # Add banks with realistic capital values (₹500K - ₹5M range)
         for i in range(num_banks):
-            capital = 1000 + i * 200 + np.random.uniform(-300, 300)
-            rwa = capital * (8 + np.random.uniform(2, 6))
+            # Base capital scales with bank size: 500K + (i * 200K) with ±100K variation
+            base_capital = 500_000 + (i * 200_000)
+            capital = base_capital + np.random.uniform(-100_000, 100_000)
+            
+            # Risk-weighted assets: 8-14x capital (Basel norms)
+            rwa = capital * np.random.uniform(8.0, 14.0)
+            
             bank = BankAgent(
                 agent_id=f"BANK_{i+1}",
                 initial_capital=capital,
                 initial_assets=rwa,
-                initial_liquidity=capital * np.random.uniform(0.15, 0.30),
-                initial_npa_ratio=2.0 + np.random.uniform(0, 8),
+                initial_liquidity=capital * np.random.uniform(0.15, 0.30),  # 15-30% of capital
+                initial_npa_ratio=np.random.uniform(2.0, 8.0),  # 2-8% NPA
                 initial_crar=(capital / rwa) * 100
             )
             sim.add_agent(bank)
@@ -826,7 +944,9 @@ class SimulationFactory:
             ccp_id, ccp_name = ccp_names[i % len(ccp_names)]
             if i >= len(ccp_names):
                 ccp_id = f"{ccp_id}_{i}"
-            ccp = CCPAgent(ccp_id, initial_default_fund=5000 + np.random.uniform(-1000, 2000))
+            # CCPs have large default funds: ₹5M - ₹7M range
+            default_fund = 5_000_000 + np.random.uniform(-1_000_000, 2_000_000)
+            ccp = CCPAgent(ccp_id, initial_default_fund=default_fund)
             sim.add_agent(ccp)
         
         # Add Multiple Regulators (RBI, SEBI, IRDAI, PFRDA)
@@ -876,7 +996,7 @@ class SimulationFactory:
         if user_entity:
             SimulationFactory.add_user_entity(sim, user_entity)
         
-        logger.info(f"Created default scenario with {num_banks} banks, {num_sectors} sectors, {num_ccps} CCPs, 4 regulators")
+        # logger.info(f"Created default scenario with {num_banks} banks, {num_sectors} sectors, {num_ccps} CCPs, 4 regulators")
         return sim
     
     @staticmethod
@@ -889,8 +1009,8 @@ class SimulationFactory:
         policies = user_entity.get('policies', {})
         
         if entity_type == 'bank':
-            # Create user bank with specified policies
-            capital = 1500 + np.random.uniform(-200, 200)
+            # Create user bank with realistic capital (₹1.3M - ₹1.7M)
+            capital = 1_500_000 + np.random.uniform(-200_000, 200_000)
             rwa = capital * 10
             bank = BankAgent(
                 agent_id=entity_id,
@@ -967,4 +1087,4 @@ class SimulationFactory:
                 exposure = bank.capital * np.random.uniform(1.0, 2.5)
                 sim.add_exposure(bank.agent_id, entity_id, exposure_amount=exposure)
         
-        logger.info(f"Added user entity: {entity_id} ({entity_type})")
+        # logger.info(f"Added user entity: {entity_id} ({entity_type})")

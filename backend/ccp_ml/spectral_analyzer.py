@@ -264,6 +264,65 @@ class SpectralAnalyzer:
         
         return principal
     
+    def compute_eigenvector_centrality(self) -> Dict[int, float]:
+        """
+        Compute eigenvector centrality for loss mutualization.
+        
+        Returns normalized eigenvector centrality scores that sum to 1.0.
+        These are used to distribute CCP losses proportionally to systemic importance.
+        """
+        if self.eigenvectors is None or self.eigenvalues is None:
+            return {}
+        
+        # Get principal eigenvector (associated with largest eigenvalue)
+        sorted_indices = np.argsort(np.abs(self.eigenvalues))[::-1]
+        principal_eigenvector = np.real(self.eigenvectors[:, sorted_indices[0]])
+        
+        # Take absolute values and normalize to sum to 1
+        centrality = np.abs(principal_eigenvector)
+        total = np.sum(centrality)
+        
+        if total > 0:
+            centrality = centrality / total
+        else:
+            # Fallback: equal weights
+            centrality = np.ones(len(centrality)) / len(centrality)
+        
+        # Return as dictionary mapping node index to centrality
+        return {i: float(centrality[i]) for i in range(len(centrality))}
+    
+    def normalize_payoff_matrix(self, payoff_matrix: np.ndarray) -> np.ndarray:
+        """
+        Normalize payoff matrix using principal eigenvector.
+        
+        This ensures the CCP (assumed to be the center node) has zero net payoff
+        by redistributing gains/losses proportionally to eigenvector centrality.
+        
+        Args:
+            payoff_matrix: n×n matrix where element (i,j) is payoff from i to j
+            
+        Returns:
+            Normalized matrix where sum of CCP row/column = 0
+        """
+        if self.eigenvectors is None or payoff_matrix.size == 0:
+            return payoff_matrix
+        
+        n = payoff_matrix.shape[0]
+        centrality = self.compute_eigenvector_centrality()
+        centrality_vector = np.array([centrality.get(i, 1.0/n) for i in range(n)])
+        
+        # Normalize each row by eigenvector weights
+        # This redistributes payoffs proportionally to systemic importance
+        normalized = payoff_matrix.copy()
+        
+        for i in range(n):
+            row_sum = np.sum(payoff_matrix[i, :])
+            if row_sum != 0:
+                # Redistribute row's payoffs proportionally to centrality
+                normalized[i, :] = payoff_matrix[i, :] * centrality_vector / np.sum(centrality_vector)
+        
+        return normalized
+    
     def compute_contagion_index(self) -> float:
         """
         Compute overall contagion index for the network.

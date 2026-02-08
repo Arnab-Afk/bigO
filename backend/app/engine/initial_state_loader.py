@@ -154,7 +154,8 @@ class InitialStateLoader:
             # Calculate capital and RWA from CRAR
             # CRAR = (Capital / RWA) * 100
             # Assume RWA as a base value, then derive capital
-            assumed_rwa = 10000.0  # Base scale
+            # Use realistic scale: ₹10 million base RWA
+            assumed_rwa = 10_000_000.0  # 10 million base scale
             capital = (crar_value / 100.0) * assumed_rwa
             
             # Get NPA ratio if available
@@ -202,6 +203,7 @@ class InitialStateLoader:
     def _create_synthetic_banks(self, num_banks: int = 10) -> Dict[str, BankAgent]:
         """
         Fallback: Create synthetic banks if real data is unavailable.
+        Uses realistic capital values (₹500K - ₹5M range).
         """
         banks = {}
         
@@ -209,10 +211,14 @@ class InitialStateLoader:
             bank_id = f"BANK_{i+1}"
             
             # Vary parameters to create heterogeneity
-            capital = 1000 + i * 300 + np.random.uniform(-200, 200)
-            rwa = capital * (8 + np.random.uniform(2, 6))
+            # Base capital: 500K + (i * 200K) with ±100K variation
+            base_capital = 500_000 + (i * 200_000)
+            capital = base_capital + np.random.uniform(-100_000, 100_000)
+            
+            # RWA: 8-14x capital (Basel norms)
+            rwa = capital * np.random.uniform(8.0, 14.0)
             crar = (capital / rwa) * 100
-            npa_ratio = 2.0 + np.random.uniform(0, 8)
+            npa_ratio = np.random.uniform(2.0, 8.0)
             liquidity = capital * np.random.uniform(0.15, 0.30)
             
             bank_agent = BankAgent(

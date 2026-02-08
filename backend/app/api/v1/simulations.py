@@ -127,11 +127,11 @@ async def create_simulation(
     # Dispatch to Celery for background execution
     try:
         task = run_simulation_task.delay(str(simulation.id))
-        logger.info(
-            "Simulation task queued",
-            simulation_id=str(simulation.id),
-            task_id=task.id
-        )
+        # logger.info(
+        #     "Simulation task queued",
+        #     simulation_id=str(simulation.id),
+        #     task_id=task.id
+        # )
     except Exception as e:
         logger.error(
             "Failed to queue simulation",
@@ -178,11 +178,11 @@ async def start_simulation(
     # Dispatch to Celery
     try:
         task = run_simulation_task.delay(str(simulation.id))
-        logger.info(
-            "Simulation task started",
-            simulation_id=str(simulation.id),
-            task_id=task.id
-        )
+        # logger.info(
+        #     "Simulation task started",
+        #     simulation_id=str(simulation.id),
+        #     task_id=task.id
+        # )
     except Exception as e:
         logger.error(
             "Failed to start simulation",

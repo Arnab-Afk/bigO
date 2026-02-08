@@ -137,7 +137,36 @@ export async function respondToDecision(
 }
 
 /**
- * Apply a shock to a specific target (e.g., sector or agent)
+ * Apply a generic shock with sector and severity selection
+ * POST /{simId}/shock
+ */
+export async function applyShock(
+    simId: string,
+    params: {
+        shock_type: string;
+        severity: string;
+        magnitude?: number;
+        target?: string | null;
+    }
+): Promise<ShockResponse> {
+    const response = await fetch(`${BASE_URL}/${simId}/shock`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            shock_type: params.shock_type,
+            severity: params.severity,
+            magnitude: params.magnitude ?? -0.3,
+            target: params.target ?? null
+        }),
+    });
+
+    return handleResponse<ShockResponse>(response);
+}
+
+/**
+ * Apply a shock to a specific target (legacy function)
  * POST /{simId}/shock
  */
 export async function shock(
@@ -218,6 +247,29 @@ export async function getState(simId: string): Promise<SimulationState> {
             },
         },
     };
+}
+
+/**
+ * Update agent policies during simulation
+ * POST /{simId}/agent-policy
+ */
+export async function updateAgentPolicy(
+    simId: string,
+    agentId: string,
+    policies: Record<string, any>
+): Promise<{ simulation_id: string; agent_id: string; updated_policies: any; status: string }> {
+    const response = await fetch(`${BASE_URL}/${simId}/agent-policy`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            agent_id: agentId,
+            policies: policies,
+        }),
+    });
+
+    return handleResponse<{ simulation_id: string; agent_id: string; updated_policies: any; status: string }>(response);
 }
 
 /**
