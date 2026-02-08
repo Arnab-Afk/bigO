@@ -515,17 +515,17 @@ async def simulate_cascade(
     Simulate contagion cascade from initial shock.
     """
     from datetime import datetime
-    
+
     # Load network
     inst_query = select(Institution).where(Institution.is_active == True)
     institutions = (await db.execute(inst_query)).scalars().all()
-    
+
     now = datetime.utcnow()
     exp_query = select(Exposure).where(
         or_(Exposure.valid_to.is_(None), Exposure.valid_to > now)
     )
     exposures = (await db.execute(exp_query)).scalars().all()
-    
+
     # Build network
     institutions_data = [
         {'id': str(i.id), 'name': i.name, 'type': i.type.value, 'tier': i.tier.value}
@@ -543,27 +543,27 @@ async def simulate_cascade(
         }
         for e in exposures
     ]
-    
+
     network = build_network_graph(institutions_data, exposures_data)
     propagator = ContagionPropagator(network)
-    
+
     # Create initial state
     from app.engine.contagion import PropagationState
-    
+
     initial_state = PropagationState(
         capital_levels={UUID(i['id']): 10000.0 for i in institutions_data},
         liquidity_levels={UUID(i['id']): 0.5 for i in institutions_data},
         stress_levels={UUID(i['id']): 0.1 for i in institutions_data},
         defaulted=set(),
     )
-    
+
     # Run cascade
     final_state, cascade_history = propagator.propagate_shock(
         initial_state=initial_state,
         shocked_institutions=shocked_institutions,
         max_rounds=max_rounds
     )
-    
+
     return {
         "initial_shocks": [str(inst_id) for inst_id in shocked_institutions],
         "cascade_rounds": len(cascade_history),
@@ -580,3 +580,371 @@ async def simulate_cascade(
         ],
         "final_defaulted": [str(inst_id) for inst_id in final_state.defaulted],
     }
+
+
+# ========== Neo4j-powered Graph Algorithm Endpoints ==========
+
+
+@router.get("/{sim_id}/communities")
+async def get_simulation_communities(
+    sim_id: str,
+    timestep: int = Query(..., description="Simulation timestep"),
+    algorithm: str = Query("louvain", description="Algorithm: louvain or label_propagation"),
+) -> dict:
+    """
+    Detect communities in simulation network using Neo4j GDS
+
+    Args:
+        sim_id: Simulation identifier
+        timestep: Timestep to analyze
+        algorithm: Community detection algorithm
+
+    Returns:
+        Community structure and statistics
+    """
+    from app.services.graph_queries import detect_communities
+
+    try:
+        result = await detect_communities(
+            simulation_id=sim_id,
+            timestep=timestep,
+            algorithm=algorithm
+        )
+
+        return {
+            "simulation_id": sim_id,
+            "timestep": timestep,
+            "algorithm": result['algorithm'],
+            "statistics": result['statistics'],
+            "communities": result['communities'],
+            "assignments": result['assignments']
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to detect communities: {str(e)}"
+        )
+
+
+@router.get("/{sim_id}/paths/{source}/{target}")
+async def get_shortest_path(
+    sim_id: str,
+    source: str,
+    target: str,
+    timestep: int = Query(..., description="Simulation timestep"),
+) -> dict:
+    """
+    Find shortest path between two nodes in simulation network
+
+    Args:
+        sim_id: Simulation identifier
+        source: Source node ID
+        target: Target node ID
+        timestep: Timestep to analyze
+
+    Returns:
+        Shortest path information
+    """
+    from app.db.neo4j import neo4j_client
+
+    try:
+        path_result = await neo4j_client.run_shortest_path_analysis(
+            simulation_id=sim_id,
+            timestep=timestep,
+            source_node=source,
+            target_node=target
+        )
+
+        if not path_result:
+            return {
+                "simulation_id": sim_id,
+                "timestep": timestep,
+                "source": source,
+                "target": target,
+                "path_found": False,
+                "message": "No path exists between the specified nodes"
+            }
+
+        return {
+            "simulation_id": sim_id,
+            "timestep": timestep,
+            "source": source,
+            "target": target,
+            "path_found": True,
+            "path": path_result['path'],
+            "path_length": path_result['length'],
+            "total_weight": path_result['total_weight']
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to find path: {str(e)}"
+        )
+
+
+@router.get("/{sim_id}/gds/pagerank")
+async def run_pagerank(
+    sim_id: str,
+    timestep: int = Query(..., description="Simulation timestep"),
+    damping_factor: float = Query(0.85, ge=0.0, le=1.0, description="PageRank damping factor"),
+    max_iterations: int = Query(20, ge=1, le=100, description="Maximum iterations"),
+    top_k: int = Query(50, ge=1, le=500, description="Number of top nodes to return"),
+) -> dict:
+    """
+    Run PageRank algorithm on simulation network using Neo4j GDS
+
+    Args:
+        sim_id: Simulation identifier
+        timestep: Timestep to analyze
+        damping_factor: PageRank damping factor (default 0.85)
+        max_iterations: Maximum iterations
+        top_k: Number of top nodes to return
+
+    Returns:
+        PageRank scores for nodes
+    """
+    from app.db.neo4j import neo4j_client
+
+    try:
+        result = await neo4j_client.run_pagerank_algorithm(
+            simulation_id=sim_id,
+            timestep=timestep,
+            dampingFactor=damping_factor,
+            max_iterations=max_iterations
+        )
+
+        # Return top K nodes
+        top_nodes = result[:top_k]
+
+        return {
+            "simulation_id": sim_id,
+            "timestep": timestep,
+            "algorithm": "pagerank",
+            "parameters": {
+                "damping_factor": damping_factor,
+                "max_iterations": max_iterations
+            },
+            "node_count": len(result),
+            "top_nodes": top_nodes
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to run PageRank: {str(e)}"
+        )
+
+
+@router.get("/{sim_id}/gds/betweenness")
+async def run_betweenness_centrality(
+    sim_id: str,
+    timestep: int = Query(..., description="Simulation timestep"),
+    top_k: int = Query(50, ge=1, le=500, description="Number of top nodes to return"),
+) -> dict:
+    """
+    Run betweenness centrality on simulation network using Neo4j GDS
+
+    Args:
+        sim_id: Simulation identifier
+        timestep: Timestep to analyze
+        top_k: Number of top nodes to return
+
+    Returns:
+        Betweenness centrality scores
+    """
+    from app.services.graph_queries import get_node_importance_scores
+
+    try:
+        result = await get_node_importance_scores(
+            simulation_id=sim_id,
+            timestep=timestep,
+            algorithm="betweenness"
+        )
+
+        top_nodes = result[:top_k]
+
+        return {
+            "simulation_id": sim_id,
+            "timestep": timestep,
+            "algorithm": "betweenness_centrality",
+            "node_count": len(result),
+            "top_nodes": top_nodes
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to compute betweenness centrality: {str(e)}"
+        )
+
+
+@router.get("/{sim_id}/gds/eigenvector")
+async def run_eigenvector_centrality(
+    sim_id: str,
+    timestep: int = Query(..., description="Simulation timestep"),
+    top_k: int = Query(50, ge=1, le=500, description="Number of top nodes to return"),
+) -> dict:
+    """
+    Run eigenvector centrality on simulation network using Neo4j GDS
+
+    Args:
+        sim_id: Simulation identifier
+        timestep: Timestep to analyze
+        top_k: Number of top nodes to return
+
+    Returns:
+        Eigenvector centrality scores
+    """
+    from app.services.graph_queries import get_node_importance_scores
+
+    try:
+        result = await get_node_importance_scores(
+            simulation_id=sim_id,
+            timestep=timestep,
+            algorithm="eigenvector"
+        )
+
+        top_nodes = result[:top_k]
+
+        return {
+            "simulation_id": sim_id,
+            "timestep": timestep,
+            "algorithm": "eigenvector_centrality",
+            "node_count": len(result),
+            "top_nodes": top_nodes
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to compute eigenvector centrality: {str(e)}"
+        )
+
+
+@router.get("/{sim_id}/gds/critical-paths")
+async def get_critical_paths(
+    sim_id: str,
+    timestep: int = Query(..., description="Simulation timestep"),
+    source_node: Optional[str] = Query(None, description="Optional source node"),
+    min_weight: float = Query(0.0, ge=0.0, description="Minimum path weight"),
+    max_paths: int = Query(10, ge=1, le=100, description="Maximum paths to return"),
+) -> dict:
+    """
+    Find critical contagion paths in simulation network
+
+    Args:
+        sim_id: Simulation identifier
+        timestep: Timestep to analyze
+        source_node: Optional source node ID
+        min_weight: Minimum path weight threshold
+        max_paths: Maximum number of paths to return
+
+    Returns:
+        Critical paths with metrics
+    """
+    from app.services.graph_queries import find_critical_paths
+
+    try:
+        paths = await find_critical_paths(
+            simulation_id=sim_id,
+            timestep=timestep,
+            source_node=source_node,
+            min_weight=min_weight,
+            max_paths=max_paths
+        )
+
+        return {
+            "simulation_id": sim_id,
+            "timestep": timestep,
+            "source_node": source_node,
+            "parameters": {
+                "min_weight": min_weight,
+                "max_paths": max_paths
+            },
+            "paths_found": len(paths),
+            "critical_paths": paths
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to find critical paths: {str(e)}"
+        )
+
+
+@router.get("/{sim_id}/clustering")
+async def get_clustering_coefficient(
+    sim_id: str,
+    timestep: int = Query(..., description="Simulation timestep"),
+    node_id: Optional[str] = Query(None, description="Optional specific node"),
+) -> dict:
+    """
+    Compute clustering coefficient for network or specific node
+
+    Args:
+        sim_id: Simulation identifier
+        timestep: Timestep to analyze
+        node_id: Optional specific node ID
+
+    Returns:
+        Clustering coefficient(s)
+    """
+    from app.services.graph_queries import compute_clustering_coefficient
+
+    try:
+        result = await compute_clustering_coefficient(
+            simulation_id=sim_id,
+            timestep=timestep,
+            node_id=node_id
+        )
+
+        return {
+            "simulation_id": sim_id,
+            "timestep": timestep,
+            "node_id": node_id,
+            **result
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to compute clustering coefficient: {str(e)}"
+        )
+
+
+@router.get("/{sim_id}/degree-distribution")
+async def get_degree_distribution(
+    sim_id: str,
+    timestep: int = Query(..., description="Simulation timestep"),
+) -> dict:
+    """
+    Get degree distribution statistics for simulation network
+
+    Args:
+        sim_id: Simulation identifier
+        timestep: Timestep to analyze
+
+    Returns:
+        Degree distribution statistics
+    """
+    from app.services.graph_queries import compute_degree_distribution
+
+    try:
+        result = await compute_degree_distribution(
+            simulation_id=sim_id,
+            timestep=timestep
+        )
+
+        return {
+            "simulation_id": sim_id,
+            "timestep": timestep,
+            **result
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to compute degree distribution: {str(e)}"
+        )
