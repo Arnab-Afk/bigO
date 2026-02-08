@@ -29,33 +29,38 @@ class RBIDataCleaner:
         
         file_path = self.data_dir / "3.Bank-wise Capital Adequacy Ratios (CRAR) of Scheduled Commercial Banks.csv"
         
-        # Read raw data, skip header rows
-        df = pd.read_csv(file_path, skiprows=8)
+        # Read raw data, skip header rows (line numbers 0-5 are headers/empty)
+        df = pd.read_csv(file_path, skiprows=6)
         
-        # Use first row as column names
-        df.columns = ['Year', 'Bank', 'Basel1_T1', 'Basel1_T2', 'Basel1_Total', 
+        # The structure is: Column 0 (empty), Year, Bank Name, Basel columns...
+        # Rename columns properly
+        df.columns = ['Empty', 'Year', 'Bank_Name', 'Basel1_T1', 'Basel1_T2', 'Basel1_Total', 
                       'Basel2_T1', 'Basel2_T2', 'Basel2_Total',
-                      'Basel3_T1', 'Basel3_T2', 'Basel3_Total', 'Extra']
+                      'Basel3_T1', 'Basel3_T2', 'Basel3_Total']
         
-        # Drop extra columns and rows with missing bank names
-        df = df[['Year', 'Bank', 'Basel3_T1', 'Basel3_T2', 'Basel3_Total']].copy()
-        df = df[df['Bank'].notna() & (df['Bank'] != '')]
+        # Drop empty column
+        df = df.drop('Empty', axis=1, errors='ignore')
         
-        # Skip category headers
-        df = df[~df['Bank'].str.contains('SECTOR BANKS|BANKS', case=False, na=False)]
+        # Forward fill Year (year appears in one row, then banks follow)
+        df['Year'] = df['Year'].ffill()
         
-        # Convert to numeric
+        # Filter: keep only rows with actual bank names (not empty, not category headers)
+        df = df[df['Bank_Name'].notna() & (df['Bank_Name'] != '')]
+        df = df[~df['Bank_Name'].str.contains('SECTOR BANKS|PUBLIC SECTOR|PRIVATE SECTOR|FOREIGN|BANKS$', case=False, na=False, regex=True)]
+        
+        # Convert to numeric (.. means not applicable)
         for col in ['Basel3_T1', 'Basel3_T2', 'Basel3_Total']:
             df[col] = pd.to_numeric(df[col].replace('..', np.nan), errors='coerce')
         
         # Store by bank
         for _, row in df.iterrows():
-            bank = row['Bank'].strip()
-            if bank not in self.banks_data:
-                self.banks_data[bank] = {}
-            self.banks_data[bank]['tier1_capital'] = row['Basel3_T1']
-            self.banks_data[bank]['tier2_capital'] = row['Basel3_T2']
-            self.banks_data[bank]['total_crar'] = row['Basel3_Total']
+            bank = row['Bank_Name'].strip()
+            if bank and not pd.isna(row['Basel3_Total']):  # Only add if has data
+                if bank not in self.banks_data:
+                    self.banks_data[bank] = {}
+                self.banks_data[bank]['tier1_capital'] = row['Basel3_T1']
+                self.banks_data[bank]['tier2_capital'] = row['Basel3_T2']
+                self.banks_data[bank]['total_crar'] = row['Basel3_Total']
         
         logger.info(f"Processed CRAR for {len(self.banks_data)} banks")
         return df
@@ -66,26 +71,32 @@ class RBIDataCleaner:
         
         file_path = self.data_dir / "6.Movement of Non Performing Assets (NPAs) of Scheduled Commercial Banks.csv"
         
-        # Read raw data
+        # Read raw data (skiprows=8 to get past headers)
         df = pd.read_csv(file_path, skiprows=8)
         
-        # Set column names
-        df.columns = ['Year', 'Bank', 'Gross_Opening', 'Gross_Addition', 'Gross_Reduction', 
+        # Set column names properly
+        df.columns = ['Empty', 'Year', 'Bank_Name', 'Gross_Opening', 'Gross_Addition', 'Gross_Reduction', 
                       'Gross_Writeoff', 'Gross_Closing', 'Net_Opening', 'Net_Closing', 'Extra']
         
-        df = df[['Year', 'Bank', 'Gross_Closing', 'Net_Closing']].copy()
-        df = df[df['Bank'].notna() & (df['Bank'] != '')]
-        df = df[~df['Bank'].str.contains('SECTOR BANKS|BANKS', case=False, na=False)]
+        # Drop empty column
+        df = df.drop(['Empty', 'Extra'], axis=1, errors='ignore')
         
-        # Clean numbers (remove commas)
+        # Forward fill Year
+        df['Year'] = df['Year'].ffill()
+        
+        # Filter valid rows
+        df = df[df['Bank_Name'].notna() & (df['Bank_Name'] != '')]
+        df = df[~df['Bank_Name'].str.contains('SECTOR BANKS|PUBLIC SECTOR|PRIVATE SECTOR|FOREIGN|BANKS$', case=False, na=False, regex=True)]
+        
+        # Clean numbers (remove commas, handle dashes as zero)
         for col in ['Gross_Closing', 'Net_Closing']:
-            df[col] = df[col].astype(str).str.replace(',', '').replace('-', '0')
+            df[col] = df[col].astype(str).str.replace(',', '').str.replace('-', '0')
             df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # Store by bank
         for _, row in df.iterrows():
-            bank = row['Bank'].strip()
-            if bank in self.banks_data:
+            bank = row['Bank_Name'].strip()
+            if bank in self.banks_data and pd.notna(row['Gross_Closing']):
                 self.banks_data[bank]['gross_npa'] = row['Gross_Closing']
                 self.banks_data[bank]['net_npa'] = row['Net_Closing']
         
@@ -100,20 +111,26 @@ class RBIDataCleaner:
         
         df = pd.read_csv(file_path, skiprows=6)
         
-        df.columns = ['Year', 'Bank', 'Capital_Market', 'Real_Estate', 'Commodities', 'Total_Exposure', 'Extra']
-        df = df[['Year', 'Bank', 'Capital_Market', 'Real_Estate', 'Total_Exposure']].copy()
-        df = df[df['Bank'].notna() & (df['Bank'] != '')]
-        df = df[~df['Bank'].str.contains('SECTOR BANKS|BANKS', case=False, na=False)]
+        # Proper column structure
+        df.columns = ['Empty', 'Year', 'Bank_Name', 'Capital_Market', 'Real_Estate', 'Commodities', 'Total_Exposure', 'Extra']
+        df = df.drop(['Empty', 'Extra'], axis=1, errors='ignore')
+        
+        # Forward fill Year
+        df['Year'] = df['Year'].ffill()
+        
+        # Filter valid rows
+        df = df[df['Bank_Name'].notna() & (df['Bank_Name'] != '')]
+        df = df[~df['Bank_Name'].str.contains('SECTOR BANKS|PUBLIC SECTOR|PRIVATE SECTOR|FOREIGN|BANKS$', case=False, na=False, regex=True)]
         
         # Clean numbers
         for col in ['Capital_Market', 'Real_Estate', 'Total_Exposure']:
-            df[col] = df[col].astype(str).str.replace(',', '').replace('-', '0')
+            df[col] = df[col].astype(str).str.replace(',', '').str.replace('-', '0')
             df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # Store by bank
         for _, row in df.iterrows():
-            bank = row['Bank'].strip()
-            if bank in self.banks_data:
+            bank = row['Bank_Name'].strip()
+            if bank in self.banks_data and pd.notna(row['Total_Exposure']):
                 self.banks_data[bank]['capital_market_exp'] = row['Capital_Market']
                 self.banks_data[bank]['real_estate_exp'] = row['Real_Estate']
                 self.banks_data[bank]['total_sensitive_exp'] = row['Total_Exposure']

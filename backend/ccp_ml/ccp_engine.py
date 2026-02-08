@@ -203,6 +203,49 @@ class CCPEngine:
         logger.info("CCP analysis complete")
         return results
     
+    def calculate_margins(self) -> Dict[str, MarginRequirement]:
+        """
+        Get margin requirements for all participants.
+        Returns cached results from last analysis run.
+        
+        Returns:
+            Dictionary mapping bank names to margin requirements
+        """
+        if self.margin_requirements is None:
+            logger.warning("No margin requirements available. Run analysis first.")
+            return {}
+        
+        # Convert list to dict for API compatibility
+        result = {}
+        for margin in self.margin_requirements:
+            result[margin.bank_name] = margin
+        return result
+    
+    def calculate_default_fund(self) -> Dict[str, Any]:
+        """
+        Get default fund allocation.
+        Returns cached results from last analysis run.
+        
+        Returns:
+            Dictionary with default fund details
+        """
+        if self.default_fund is None:
+            logger.warning("No default fund available. Run analysis first.")
+            return {
+                'total_fund': 0,
+                'cover_n': self.COVER_N,
+                'largest_contributions': []
+            }
+        
+        return {
+            'total_fund': sum(d.total_contribution for d in self.default_fund),
+            'cover_n': self.COVER_N,
+            'largest_contributions': sorted(
+                [(d.bank_name, d.total_contribution) for d in self.default_fund],
+                key=lambda x: x[1], reverse=True
+            )[:5]
+        }
+    
     def _calculate_margins(self, features: pd.DataFrame) -> List[MarginRequirement]:
         """
         Calculate initial margin requirements for each participant.

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "RUDRA"
     APP_VERSION: str = "0.1.0"
     APP_DESCRIPTION: str = "Resilient Unified Decision & Risk Analytics"
-    DEBUG: bool = False
+    DEBUG: bool = True
     ENVIRONMENT: str = "development"
     
     # API
