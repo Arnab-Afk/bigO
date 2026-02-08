@@ -31,6 +31,7 @@ class SpectralMetrics:
     spectral_gap: float     # Difference between largest eigenvalues
     eigenvalue_entropy: float  # Entropy of eigenvalue distribution
     effective_rank: float   # How many dimensions capture variation
+    contagion_index: float  # Measure of shock propagation potential
     
     # Risk interpretations
     amplification_risk: str  # 'low', 'medium', 'high'
@@ -57,6 +58,7 @@ class SpectralAnalyzer:
         self.eigenvectors = None
         self.laplacian_eigenvalues = None
         self.laplacian_eigenvectors = None
+        self.metrics = None
     
     def analyze(
         self, 
@@ -111,6 +113,11 @@ class SpectralAnalyzer:
         eigenvalue_entropy = self._compute_eigenvalue_entropy()
         effective_rank = self._compute_effective_rank()
         
+        # Compute contagion index (normalized spectral radius)
+        # Measures potential for shock propagation
+        n_nodes = adjacency_matrix.shape[0]
+        contagion_index = spectral_radius / np.sqrt(n_nodes) if n_nodes > 0 else 0.0
+        
         # Risk categorization
         amplification_risk = self._categorize_amplification_risk(spectral_radius)
         fragmentation_risk = self._categorize_fragmentation_risk(fiedler_value)
@@ -121,9 +128,13 @@ class SpectralAnalyzer:
             spectral_gap=spectral_gap,
             eigenvalue_entropy=eigenvalue_entropy,
             effective_rank=effective_rank,
+            contagion_index=contagion_index,
             amplification_risk=amplification_risk,
             fragmentation_risk=fragmentation_risk
         )
+        
+        # Store metrics for later access
+        self.metrics = metrics
         
         logger.info(f"Spectral analysis complete: ρ={spectral_radius:.3f}, λ2={fiedler_value:.3f}")
         return metrics

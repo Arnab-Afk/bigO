@@ -1,7 +1,7 @@
 """API routes package"""
 from fastapi import APIRouter
 
-from app.api.v1 import institutions, exposures, network, simulations, scenarios, health
+from app.api.v1 import institutions, exposures, network, simulations, scenarios, health, ml, ccp
 
 # Create main API router
 api_router = APIRouter()
@@ -41,3 +41,15 @@ api_router.include_router(
     prefix="/scenarios",
     tags=["Scenarios"]
 )
+
+# ML and CCP endpoints
+api_router.include_router(
+    ml.router,
+    tags=["Machine Learning"]
+)
+
+api_router.include_router(
+    ccp.router,
+    tags=["CCP Risk Analysis"]
+)
+
