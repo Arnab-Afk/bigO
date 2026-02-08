@@ -39,9 +39,10 @@ class SimulationConfig:
     """Configuration for simulation parameters"""
     max_timesteps: int = 100
     enable_shocks: bool = True
-    shock_probability: float = 0.1
-    contagion_multiplier: float = 1.0
+    shock_probability: float = 0.05  # Reduced from 0.1 to 0.05 for stability
+    contagion_multiplier: float = 0.5  # Reduced from 1.0 to make losses less severe
     enable_regulator: bool = True
+    enable_ml: bool = False  # ML is OPT-IN, not forced
     random_seed: Optional[int] = None
 
 
@@ -93,6 +94,40 @@ class FinancialEcosystem:
         self.history: List[SimulationSnapshot] = []
         self.agents: Dict[str, Agent] = {}
         
+        # Initialize ML risk advisor
+        from app.ml.risk_mitigation import initialize_risk_advisor
+        from app.ml.inference.predictor import DefaultPredictor
+        from pathlib import Path
+        
+        try:
+            # Try to load trained ML model
+            model_path = Path("ml_models/default_predictor/model.pt")
+            
+            # ML is OPT-IN, not forced on by default
+            # Set enable_ml=False in config to disable
+            enable_ml = getattr(config, 'enable_ml', False)
+            
+            if enable_ml and model_path.exists():
+                default_predictor = DefaultPredictor(model_path=model_path)
+                self.ml_risk_advisor = initialize_risk_advisor(
+                    default_predictor=default_predictor,
+                    risk_aversion=0.3,  # Lower risk aversion for stability
+                )
+                logger.info("ML risk advisor initialized with trained model")
+            elif enable_ml:
+                # Use advisor without ML model (uses heuristics)
+                self.ml_risk_advisor = initialize_risk_advisor(
+                    default_predictor=None,
+                    risk_aversion=0.3,  # Lower risk aversion
+                )
+                logger.info("ML risk advisor initialized with heuristic fallback")
+            else:
+                self.ml_risk_advisor = None
+                logger.info("ML risk advisor DISABLED - using traditional strategy")
+        except Exception as e:
+            logger.warning(f"Failed to initialize ML risk advisor: {e}")
+            self.ml_risk_advisor = None
+        
         # Initialize random seed for reproducibility
         if config.random_seed:
             np.random.seed(config.random_seed)
@@ -101,7 +136,8 @@ class FinancialEcosystem:
     
     def add_agent(self, agent: Agent) -> None:
         """
-        Add an agent to the ecosystem.
+        Add an agent to the ecosystem and inject ML risk advisor.
+        Auto-connects RBI and CCP to other nodes for better network integration.
         """
         self.agents[agent.agent_id] = agent
         self.network.add_node(
@@ -110,6 +146,49 @@ class FinancialEcosystem:
             agent_type=agent.agent_type.value,
             alive=agent.alive
         )
+        
+        # Inject ML risk advisor into agent
+        if self.ml_risk_advisor:
+            if isinstance(agent, (BankAgent, CCPAgent)):
+                agent.ml_risk_advisor = self.ml_risk_advisor
+                logger.debug(f"Injected ML risk advisor into {agent.agent_id}")
+        
+        # Auto-connect RBI/Regulator to all banks
+        if isinstance(agent, RegulatorAgent):
+            # Connect regulator to all existing banks
+            for agent_id, a in self.agents.items():
+                if isinstance(a, BankAgent) and agent_id != agent.agent_id:
+                    self.network.add_edge(agent.agent_id, agent_id, weight=0, type='regulatory')
+                    logger.debug(f"Connected regulator {agent.agent_id} to {agent_id}")
+        
+        # If adding a bank and regulator exists, connect them
+        if isinstance(agent, BankAgent):
+            for a in self.agents.values():
+                if isinstance(a, RegulatorAgent):
+                    self.network.add_edge(a.agent_id, agent.agent_id, weight=0, type='regulatory')
+                    logger.debug(f"Connected bank {agent.agent_id} to regulator {a.agent_id}")
+        
+        # Auto-connect CCP to all banks (bidirectional clearing relationships)
+        if isinstance(agent, CCPAgent):
+            for agent_id, a in self.agents.items():
+                if isinstance(a, BankAgent) and agent_id != agent.agent_id:
+                    # Bank to CCP (clearing obligations)
+                    clearing_amount = a.capital * 0.05  # 5% of capital as initial margin
+                    self.network.add_edge(agent_id, agent.agent_id, weight=clearing_amount, type='clearing')
+                    # CCP to Bank (potential default fund claims)
+                    self.network.add_edge(agent.agent_id, agent_id, weight=0, type='clearing_reciprocal')
+                    logger.debug(f"Connected CCP {agent.agent_id} to {agent_id}")
+        
+        # If adding a bank and CCP exists, connect them
+        if isinstance(agent, BankAgent):
+            for a in self.agents.values():
+                if isinstance(a, CCPAgent):
+                    clearing_amount = agent.capital * 0.05
+                    self.network.add_edge(agent.agent_id, a.agent_id, weight=clearing_amount, type='clearing')
+                    self.network.add_edge(a.agent_id, agent.agent_id, weight=0, type='clearing_reciprocal')
+                    a.active_exposures += clearing_amount
+                    logger.debug(f"Connected bank {agent.agent_id} to CCP {a.agent_id}")
+        
         logger.info(f"Added {agent.agent_type.value} agent: {agent.agent_id}")
     
     def add_exposure(
@@ -248,6 +327,14 @@ class FinancialEcosystem:
             events = ccp.act(self.network)
             all_events.extend(events)
         
+        # Step 7a: Dynamic network evolution - create new nodes (small probability)
+        new_node_events = self._maybe_create_new_node()
+        all_events.extend(new_node_events)
+        
+        # Step 7b: Dynamic edge creation - form new loans/transactions
+        new_edge_events = self._maybe_create_new_edges()
+        all_events.extend(new_edge_events)
+        
         # Step 8: Contagion - Interbank loss propagation
         contagion_events = self._propagate_contagion()
         all_events.extend(contagion_events)
@@ -262,6 +349,128 @@ class FinancialEcosystem:
         self.timestep += 1
         
         return snapshot
+    
+    def _maybe_create_new_node(self) -> List[Dict[str, Any]]:
+        """
+        Dynamically create a new node (bank/CCP) with small probability.
+        Probability: 3% per timestep
+        """
+        events = []
+        
+        # Small chance to create a new bank (3%)
+        if np.random.random() < 0.03:
+            bank_count = len([a for a in self.agents.values() if isinstance(a, BankAgent)])
+            new_bank_id = f"BANK_{bank_count + 1}"
+            
+            # Create new bank with randomized but reasonable parameters
+            capital = np.random.uniform(500, 2000)
+            rwa = capital * np.random.uniform(8, 15)
+            
+            new_bank = BankAgent(
+                agent_id=new_bank_id,
+                initial_capital=capital,
+                initial_assets=rwa,
+                initial_liquidity=capital * np.random.uniform(0.15, 0.25),
+                initial_npa_ratio=np.random.uniform(2.0, 5.0),
+                initial_crar=np.random.uniform(10.0, 14.0),
+                regulatory_min_crar=9.0
+            )
+            
+            # Set policy variables after initialization
+            new_bank.credit_supply_limit = capital * np.random.uniform(3, 6)
+            new_bank.risk_appetite = np.random.uniform(0.4, 0.7)
+            
+            # Add to ecosystem
+            self.agents[new_bank_id] = new_bank
+            self.network.add_node(
+                new_bank_id,
+                agent_type=AgentType.BANK.value,
+                agent=new_bank
+            )
+            
+            # Connect to RBI/Regulator if it exists
+            regulator_agents = [a for a in self.agents.values() if isinstance(a, RegulatorAgent)]
+            if regulator_agents:
+                regulator = regulator_agents[0]
+                self.network.add_edge(regulator.agent_id, new_bank_id, weight=0, type='regulatory')
+            
+            # Connect to CCP if it exists
+            ccp_agents = [a for a in self.agents.values() if isinstance(a, CCPAgent)]
+            if ccp_agents:
+                ccp = ccp_agents[0]
+                self.network.add_edge(new_bank_id, ccp.agent_id, weight=capital * 0.1, type='clearing')
+                ccp.active_exposures += capital * 0.1
+            
+            events.append({
+                'type': 'NEW_BANK_CREATED',
+                'bank_id': new_bank_id,
+                'capital': capital,
+                'timestep': self.timestep
+            })
+            
+            logger.info(f"NEW NODE: {new_bank_id} created with capital {capital:.2f}")
+        
+        return events
+    
+    def _maybe_create_new_edges(self) -> List[Dict[str, Any]]:
+        """
+        Dynamically create new loans/exposures between banks.
+        Probability: 5% per timestep for each bank to make a new loan
+        """
+        events = []
+        
+        bank_agents = [a for a in self.agents.values() if isinstance(a, BankAgent) and a.alive]
+        
+        for bank in bank_agents:
+            # Each bank has 5% chance to create new interbank loan
+            if np.random.random() < 0.05:
+                # Find potential borrowers (other alive banks not already connected strongly)
+                potential_borrowers = [
+                    b for b in bank_agents 
+                    if b.agent_id != bank.agent_id and b.alive
+                ]
+                
+                if potential_borrowers:
+                    borrower = np.random.choice(potential_borrowers)
+                    
+                    # Loan size based on lender's capacity and risk appetite
+                    max_loan = min(
+                        bank.credit_supply_limit * 0.05,  # 5% of credit limit
+                        bank.capital * bank.risk_appetite * 0.1  # 10% of risk-adjusted capital
+                    )
+                    
+                    if max_loan > 10:  # Minimum viable loan
+                        loan_amount = np.random.uniform(max_loan * 0.3, max_loan)
+                        
+                        # Add or update edge
+                        if self.network.has_edge(bank.agent_id, borrower.agent_id):
+                            # Increase existing exposure
+                            current_weight = self.network.edges[bank.agent_id, borrower.agent_id]['weight']
+                            self.network.edges[bank.agent_id, borrower.agent_id]['weight'] = current_weight + loan_amount
+                        else:
+                            # Create new edge
+                            self.network.add_edge(
+                                bank.agent_id,
+                                borrower.agent_id,
+                                weight=loan_amount,
+                                type='interbank'
+                            )
+                        
+                        # Update borrower's liquidity and lender's exposure
+                        borrower.liquidity += loan_amount
+                        borrower.debt_obligations += loan_amount * 0.05  # Interest burden
+                        
+                        events.append({
+                            'type': 'NEW_LOAN_CREATED',
+                            'lender': bank.agent_id,
+                            'borrower': borrower.agent_id,
+                            'amount': loan_amount,
+                            'timestep': self.timestep
+                        })
+                        
+                        logger.info(f"NEW LOAN: {bank.agent_id} -> {borrower.agent_id}: {loan_amount:.2f}")
+        
+        return events
     
     def _propagate_contagion(self) -> List[Dict[str, Any]]:
         """
@@ -308,7 +517,7 @@ class FinancialEcosystem:
     
     def _update_global_metrics(self) -> None:
         """
-        Compute system-wide metrics.
+        Compute system-wide metrics that properly account for dead nodes.
         """
         banks = [a for a in self.agents.values() if isinstance(a, BankAgent)]
         
@@ -316,16 +525,42 @@ class FinancialEcosystem:
             alive_banks = [b for b in banks if b.alive]
             total_banks = len(banks)
             
-            self.global_state['survival_rate'] = len(alive_banks) / total_banks
+            self.global_state['survival_rate'] = len(alive_banks) / total_banks if total_banks > 0 else 0.0
             self.global_state['avg_crar'] = np.mean([b.crar for b in alive_banks]) if alive_banks else 0.0
             self.global_state['total_defaults'] = total_banks - len(alive_banks)
             self.global_state['avg_npa'] = np.mean([b.npa_ratio for b in alive_banks]) if alive_banks else 0.0
+            
+            # System health: weighted average including dead nodes as 0
+            # This properly penalizes system for defaults
+            total_capital = sum(b.capital for b in alive_banks)
+            if total_capital > 0:
+                # Weight by capital for banks that are alive, dead banks contribute 0
+                weighted_health = sum(b.compute_health() * b.capital for b in alive_banks)
+                # Account for dead banks (they have 0 health but had capital before default)
+                dead_banks = [b for b in banks if not b.alive]
+                # Assume dead banks had average capital before default
+                avg_initial_capital = total_capital / len(alive_banks) if alive_banks else 1000
+                dead_capital_weight = len(dead_banks) * avg_initial_capital
+                total_capital_including_dead = total_capital + dead_capital_weight
+                
+                self.global_state['system_health'] = weighted_health / total_capital_including_dead if total_capital_including_dead > 0 else 0.0
+            else:
+                # All banks are dead
+                self.global_state['system_health'] = 0.0
+            
+            # Clamp system health to [0, 1]
+            self.global_state['system_health'] = min(1.0, max(0.0, self.global_state['system_health']))
             
             # Market volatility proxy: variance in CRAR
             if len(alive_banks) > 1:
                 self.global_state['market_volatility'] = np.std([b.crar for b in alive_banks]) / 10.0
             else:
                 self.global_state['market_volatility'] = 1.0
+            
+            # Total system liquidity and capital
+            self.global_state['system_liquidity'] = sum(b.liquidity for b in alive_banks)
+            self.global_state['system_capital'] = total_capital
+            self.global_state['system_npa'] = sum(b.npa_ratio * b.capital for b in alive_banks) / total_capital if total_capital > 0 else 0.0
     
     def _create_snapshot(self, events: List[Dict[str, Any]]) -> SimulationSnapshot:
         """
@@ -340,19 +575,27 @@ class FinancialEcosystem:
                 'type': agent.agent_type.value
             }
             
-            # Add type-specific data
-            if isinstance(agent, BankAgent):
+            # Add type-specific data - use agent_type to avoid isinstance issues
+            if agent.agent_type == AgentType.BANK:
                 agent_states[agent_id].update({
-                    'capital': agent.capital,
-                    'crar': agent.crar,
-                    'liquidity': agent.liquidity,
-                    'npa_ratio': agent.npa_ratio,
-                    'risk_appetite': agent.risk_appetite
+                    'capital': float(agent.capital),
+                    'crar': float(agent.crar),
+                    'liquidity': float(agent.liquidity),
+                    'npa_ratio': float(agent.npa_ratio),
+                    'risk_appetite': float(agent.risk_appetite),
+                    'credit_supply_limit': float(agent.credit_supply_limit),
+                    'interbank_limit': float(agent.interbank_limit)
                 })
-            elif isinstance(agent, SectorAgent):
+            elif agent.agent_type == AgentType.SECTOR:
                 agent_states[agent_id].update({
-                    'economic_health': agent.economic_health,
-                    'debt_load': agent.debt_load
+                    'economic_health': float(agent.economic_health),
+                    'debt_load': float(agent.debt_load)
+                })
+            elif agent.agent_type == AgentType.CCP:
+                agent_states[agent_id].update({
+                    'default_fund_size': float(agent.default_fund_size),
+                    'margin_buffer': float(agent.margin_buffer),
+                    'initial_margin_requirement': float(agent.initial_margin_requirement)
                 })
         
         # Network state for visualization
@@ -484,46 +727,244 @@ class SimulationFactory:
     """
     
     @staticmethod
-    def create_default_scenario(config: SimulationConfig) -> FinancialEcosystem:
+    def create_default_scenario(config: SimulationConfig, user_entity: Optional[Dict[str, Any]] = None) -> FinancialEcosystem:
         """
-        Create a simple default scenario for testing.
+        Create a simple default scenario with randomized parameters.
         """
         sim = FinancialEcosystem(config)
         
-        # Add 5 banks
-        for i in range(5):
+        # Randomize number of banks (75-125 for much richer network - 5x increase)
+        num_banks = np.random.randint(75, 126)
+        
+        # Add banks with randomized parameters
+        for i in range(num_banks):
+            capital = 1000 + i * 200 + np.random.uniform(-300, 300)
+            rwa = capital * (8 + np.random.uniform(2, 6))
             bank = BankAgent(
                 agent_id=f"BANK_{i+1}",
-                initial_capital=1000 + i * 200,
-                initial_assets=10000 + i * 2000,
-                initial_liquidity=500 + i * 100,
-                initial_npa_ratio=2.0 + i * 0.5,
-                initial_crar=12.0 + i
+                initial_capital=capital,
+                initial_assets=rwa,
+                initial_liquidity=capital * np.random.uniform(0.15, 0.30),
+                initial_npa_ratio=2.0 + np.random.uniform(0, 8),
+                initial_crar=(capital / rwa) * 100
             )
             sim.add_agent(bank)
         
-        # Add 2 sectors
-        real_estate = SectorAgent("SECTOR_REAL_ESTATE", "Real Estate", initial_health=0.8)
-        commodities = SectorAgent("SECTOR_COMMODITIES", "Commodities", initial_health=0.75)
-        sim.add_agent(real_estate)
-        sim.add_agent(commodities)
+        # Add 20-30 sectors with random health (5x increase)
+        num_sectors = np.random.randint(20, 31)
+        sector_names = [
+            ("SECTOR_REAL_ESTATE", "Real Estate"),
+            ("SECTOR_COMMODITIES", "Commodities"),
+            ("SECTOR_INFRASTRUCTURE", "Infrastructure"),
+            ("SECTOR_MANUFACTURING", "Manufacturing"),
+            ("SECTOR_TECHNOLOGY", "Technology"),
+            ("SECTOR_RETAIL", "Retail"),
+            ("SECTOR_AGRICULTURE", "Agriculture"),
+            ("SECTOR_ENERGY", "Energy"),
+            ("SECTOR_HEALTHCARE", "Healthcare"),
+            ("SECTOR_TELECOM", "Telecommunications"),
+            ("SECTOR_FINANCE", "Financial Services"),
+            ("SECTOR_TRANSPORT", "Transportation"),
+            ("SECTOR_MINING", "Mining"),
+            ("SECTOR_CHEMICALS", "Chemicals"),
+            ("SECTOR_AUTOMOTIVE", "Automotive"),
+            ("SECTOR_CONSTRUCTION", "Construction"),
+            ("SECTOR_UTILITIES", "Utilities"),
+            ("SECTOR_MEDIA", "Media & Entertainment"),
+            ("SECTOR_HOSPITALITY", "Hospitality & Tourism"),
+            ("SECTOR_EDUCATION", "Education"),
+            ("SECTOR_PHARMA", "Pharmaceuticals"),
+            ("SECTOR_AEROSPACE", "Aerospace & Defense"),
+            ("SECTOR_TEXTILES", "Textiles"),
+            ("SECTOR_FOOD_PROCESSING", "Food Processing"),
+            ("SECTOR_IT_SERVICES", "IT Services"),
+            ("SECTOR_ECOMMERCE", "E-Commerce"),
+            ("SECTOR_LOGISTICS", "Logistics"),
+            ("SECTOR_INSURANCE", "Insurance"),
+            ("SECTOR_REAL_ESTATE_COMM", "Commercial Real Estate"),
+            ("SECTOR_METALS", "Metals & Steel"),
+        ]
         
-        # Add CCP
-        ccp = CCPAgent("CCP_MAIN", initial_default_fund=5000)
-        sim.add_agent(ccp)
+        for i in range(num_sectors):
+            sector = SectorAgent(
+                sector_names[i][0], 
+                sector_names[i][1], 
+                initial_health=np.random.uniform(0.4, 0.9)
+            )
+            sim.add_agent(sector)
         
-        # Add Regulator
-        regulator = RegulatorAgent("RBI", base_repo_rate=6.0)
-        sim.add_agent(regulator)
+        # Add 20-25 CCPs (Central Counterparties / Clearing Houses)
+        num_ccps = np.random.randint(20, 26)
+        ccp_names = [
+            ("NSCCL", "NSE Clearing"),
+            ("ICCL", "BSE Clearing"),
+            ("MCXCCL", "MCX Clearing"),
+            ("NCDEX_CL", "NCDEX Clearing"),
+            ("CDSL", "Central Depository Services"),
+            ("NSDL", "National Securities Depository"),
+            ("CCIL", "Clearing Corporation of India"),
+            ("ICEX_CL", "ICEX Clearing"),
+            ("DGCX_CL", "Dubai Gold Clearing"),
+            ("LME_CL", "London Metal Exchange Clearing"),
+            ("CME_CL", "CME Clearing"),
+            ("EUREX_CL", "Eurex Clearing"),
+            ("ICE_CL", "ICE Clear"),
+            ("LCH_CL", "LCH Clearnet"),
+            ("OCC_CL", "Options Clearing Corp"),
+            ("DTCC_CL", "DTCC Clearing"),
+            ("JSCC_CL", "Japan Securities Clearing"),
+            ("HKEX_CL", "HKEX Clearing"),
+            ("SGX_CL", "SGX Clearing"),
+            ("ASX_CL", "ASX Clear"),
+            ("BME_CL", "BME Clearing"),
+            ("SIX_CL", "SIX x-clear"),
+            ("KELER_CL", "KELER Clearing"),
+            ("CDS_CL", "Canadian Derivatives Clearing"),
+            ("BMV_CL", "BMV Clearing"),
+        ]
+        for i in range(num_ccps):
+            ccp_id, ccp_name = ccp_names[i % len(ccp_names)]
+            if i >= len(ccp_names):
+                ccp_id = f"{ccp_id}_{i}"
+            ccp = CCPAgent(ccp_id, initial_default_fund=5000 + np.random.uniform(-1000, 2000))
+            sim.add_agent(ccp)
         
-        # Create exposures (Banks -> Sectors)
-        for i in range(5):
-            sim.add_exposure(f"BANK_{i+1}", "SECTOR_REAL_ESTATE", exposure_amount=2000 + i * 500)
-            sim.add_exposure(f"BANK_{i+1}", "SECTOR_COMMODITIES", exposure_amount=1500 + i * 300)
+        # Add Multiple Regulators (RBI, SEBI, IRDAI, PFRDA)
+        regulators = [
+            ("RBI", 6.0),  # Reserve Bank of India - Banking
+            ("SEBI", 6.0),  # Securities and Exchange Board - Capital Markets
+            ("IRDAI", 6.0),  # Insurance Regulatory Authority
+            ("PFRDA", 6.0),  # Pension Fund Regulatory Authority
+        ]
+        for reg_id, rate in regulators:
+            regulator = RegulatorAgent(reg_id, base_repo_rate=rate)
+            sim.add_agent(regulator)
         
-        # Interbank exposures
-        sim.add_exposure("BANK_1", "BANK_2", exposure_amount=500)
-        sim.add_exposure("BANK_2", "BANK_3", exposure_amount=600)
-        sim.add_exposure("BANK_3", "BANK_4", exposure_amount=400)
+        # Create randomized exposures (Banks -> Sectors)
+        bank_ids = [f"BANK_{i+1}" for i in range(num_banks)]
+        sector_ids = [sector_names[i][0] for i in range(num_sectors)]
         
+        for bank_id in bank_ids:
+            bank = sim.agents[bank_id]
+            # Each bank lends to 2-3 random sectors
+            num_sector_loans = min(num_sectors, np.random.randint(2, num_sectors + 1))
+            selected_sectors = np.random.choice(sector_ids, size=num_sector_loans, replace=False)
+            
+            for sector_id in selected_sectors:
+                exposure = bank.capital * np.random.uniform(1.5, 3.5)
+                sim.add_exposure(bank_id, sector_id, exposure_amount=exposure)
+        
+        # Create randomized interbank network
+        for i in range(len(bank_ids) - 1):
+            if np.random.random() > 0.3:  # 70% chance of connection
+                creditor_id = bank_ids[i]
+                debtor_id = bank_ids[i + 1]
+                exposure = sim.agents[creditor_id].interbank_limit * np.random.uniform(0.2, 0.6)
+                sim.add_exposure(creditor_id, debtor_id, exposure_amount=exposure)
+        
+        # Add some random additional interbank links
+        for _ in range(np.random.randint(0, 3)):
+            creditor_idx = np.random.randint(0, len(bank_ids))
+            debtor_idx = np.random.randint(0, len(bank_ids))
+            if creditor_idx != debtor_idx:
+                creditor_id = bank_ids[creditor_idx]
+                debtor_id = bank_ids[debtor_idx]
+                exposure = sim.agents[creditor_id].interbank_limit * np.random.uniform(0.1, 0.4)
+                sim.add_exposure(creditor_id, debtor_id, exposure_amount=exposure)
+        
+        # Add user entity if provided
+        if user_entity:
+            SimulationFactory.add_user_entity(sim, user_entity)
+        
+        logger.info(f"Created default scenario with {num_banks} banks, {num_sectors} sectors, {num_ccps} CCPs, 4 regulators")
         return sim
+    
+    @staticmethod
+    def add_user_entity(sim: FinancialEcosystem, user_entity: Dict[str, Any]) -> None:
+        """
+        Add a user-controlled entity to the simulation.
+        """
+        entity_type = user_entity.get('type', 'bank')
+        entity_id = user_entity.get('id', 'USER_ENTITY')
+        policies = user_entity.get('policies', {})
+        
+        if entity_type == 'bank':
+            # Create user bank with specified policies
+            capital = 1500 + np.random.uniform(-200, 200)
+            rwa = capital * 10
+            bank = BankAgent(
+                agent_id=entity_id,
+                initial_capital=capital,
+                initial_assets=rwa,
+                initial_liquidity=capital * (policies.get('liquidityBuffer', 15) / 100),
+                initial_npa_ratio=policies.get('npaThreshold', 5.0),
+                initial_crar=policies.get('minCapitalRatio', 11.5)
+            )
+            bank.risk_appetite = policies.get('riskAppetite', 0.6)
+            bank.max_exposure_per_counterparty = policies.get('maxExposurePerCounterparty', 25) / 100
+            bank.is_user_controlled = True  # Mark as user-controlled for decision alerts
+            sim.add_agent(bank)
+            
+            # Connect user bank to random sectors and other banks
+            sector_agents = [a for a in sim.agents.values() if isinstance(a, SectorAgent)]
+            bank_agents = [a for a in sim.agents.values() if isinstance(a, BankAgent) and a.agent_id != entity_id]
+            
+            # Lend to 2-3 sectors
+            if sector_agents:
+                num_sector_loans = min(len(sector_agents), np.random.randint(2, 4))
+                selected_sectors = np.random.choice(sector_agents, size=num_sector_loans, replace=False)
+                for sector in selected_sectors:
+                    exposure = capital * np.random.uniform(1.5, 3.0)
+                    sim.add_exposure(entity_id, sector.agent_id, exposure_amount=exposure)
+            
+            # Interbank connections (3-5 banks)
+            if bank_agents:
+                num_connections = min(len(bank_agents), np.random.randint(3, 6))
+                selected_banks = np.random.choice(bank_agents, size=num_connections, replace=False)
+                for other_bank in selected_banks:
+                    if np.random.random() > 0.5:
+                        # Lend to other bank
+                        exposure = bank.interbank_limit * np.random.uniform(0.2, 0.5)
+                        sim.add_exposure(entity_id, other_bank.agent_id, exposure_amount=exposure)
+                    else:
+                        # Borrow from other bank
+                        exposure = other_bank.interbank_limit * np.random.uniform(0.2, 0.5)
+                        sim.add_exposure(other_bank.agent_id, entity_id, exposure_amount=exposure)
+        
+        elif entity_type == 'clearing_house':
+            # Create user CCP with specified policies
+            default_fund = policies.get('defaultFundSize', 5000000)
+            ccp = CCPAgent(entity_id, initial_default_fund=default_fund)
+            ccp.initial_margin = policies.get('initialMargin', 10) / 100
+            ccp.haircut_rate = policies.get('haircut', 5) / 100
+            sim.add_agent(ccp)
+        
+        elif entity_type == 'regulator':
+            # Create user regulator with specified policies
+            regulator = RegulatorAgent(
+                entity_id,
+                base_repo_rate=policies.get('baseRepoRate', 6.5)
+            )
+            regulator.minimum_crar = policies.get('minimumCRAR', 9.0)
+            regulator.crisis_threshold = policies.get('crisisInterventionThreshold', 0.6)
+            sim.add_agent(regulator)
+        
+        elif entity_type == 'sector':
+            # Create user sector with specified policies
+            sector = SectorAgent(
+                entity_id,
+                "User Sector",
+                initial_health=policies.get('economicHealth', 0.8)
+            )
+            sector.debt_load = policies.get('debtLoad', 45) / 100
+            sim.add_agent(sector)
+            
+            # Connect random banks to this sector
+            bank_agents = [a for a in sim.agents.values() if isinstance(a, BankAgent)]
+            num_connections = min(len(bank_agents), np.random.randint(5, 12))
+            selected_banks = np.random.choice(bank_agents, size=num_connections, replace=False)
+            for bank in selected_banks:
+                exposure = bank.capital * np.random.uniform(1.0, 2.5)
+                sim.add_exposure(bank.agent_id, entity_id, exposure_amount=exposure)
+        
+        logger.info(f"Added user entity: {entity_id} ({entity_type})")

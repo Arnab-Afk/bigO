@@ -166,6 +166,7 @@ class BankAgent(Agent):
         self.npa_ratio = initial_npa_ratio
         self.crar = initial_crar
         self.regulatory_min_crar = regulatory_min_crar
+        self.debt_obligations = 0.0  # Total debt service obligations
         
         # Policy Variables (Start Conservative)
         self.credit_supply_limit = initial_capital * 10  # 10x leverage
@@ -180,11 +181,22 @@ class BankAgent(Agent):
         
         # ML Integration (Probability of Default Predictor)
         self.default_predictor = None  # Will be injected with XGBoost model
+        self.ml_risk_advisor = None  # ML-based risk mitigation advisor
+        self.is_user_controlled = False  # Flag for user-controlled entities
+        
+        # Store references for ML processing
+        self._current_network = None
+        self._current_global_state = None
+        self._all_agent_states = {}
         
     def perceive(self, network: 'nx.DiGraph', global_state: Dict[str, Any]) -> None:
         """
         Observe neighbors and global market conditions.
         """
+        # Store references for ML processing
+        self._current_network = network
+        self._current_global_state = global_state
+        
         # Count failed neighbors
         self.neighbor_defaults = 0
         neighbor_health_scores = []
@@ -212,49 +224,227 @@ class BankAgent(Agent):
         
     def decide(self) -> Dict[str, Any]:
         """
-        Game Theory Strategy: Prisoner's Dilemma in Banking.
+        ML-Enhanced Game Theory Strategy:
+        Uses machine learning to predict risk and make proactive risk-reducing decisions.
         
-        Strategies:
-        1. Panic Rule: If stress is high, hoard liquidity (defensive).
-        2. Greed Rule: If stress is low and CRAR is strong, expand lending.
-        3. Survival Rule: If CRAR near regulatory min, deleverage aggressively.
+        New Approach:
+        1. ML Risk Assessment: Predict default probability and systemic risk
+        2. Risk Mitigation: Generate optimal actions to reduce predicted risk
+        3. Policy Optimization: Adjust parameters to minimize network-wide risk
+        4. Execution: Apply risk-reducing actions
         """
         decisions = {}
         
-        # Check for distress
-        if self.crar < self.regulatory_min_crar:
-            self.mode = AgentMode.DISTRESS
-            # Emergency deleveraging
-            self.credit_supply_limit *= 0.5
-            self.interbank_limit *= 0.3
-            self.risk_appetite = 0.1
-            decisions['action'] = 'EMERGENCY_DELEVERAGING'
-            
-        elif self.perceived_systemic_stress > 0.5 or self.neighbor_defaults > 0:
-            # Defensive Mode (The Nash Equilibrium Trap)
-            self.mode = AgentMode.DEFENSIVE
-            self.credit_supply_limit *= 0.7  # Cut lending
-            self.interbank_limit *= 0.5      # Reduce interbank exposure
-            self.risk_appetite *= 0.6        # Become risk-averse
-            decisions['action'] = 'DEFENSIVE_HOARDING'
-            
-        elif self.perceived_systemic_stress < 0.2 and self.crar > self.regulatory_min_crar + 3:
-            # Aggressive Mode (Maximize yield)
-            self.mode = AgentMode.AGGRESSIVE
-            self.credit_supply_limit *= 1.1
-            self.risk_appetite = min(0.9, self.risk_appetite * 1.2)
-            decisions['action'] = 'AGGRESSIVE_EXPANSION'
-            
+        # Use ML risk advisor if available
+        if self.ml_risk_advisor and self._current_network:
+            try:
+                # Convert self to AgentState for ML processing
+                from app.engine.game_theory import AgentState as GTAgentState
+                from uuid import UUID
+                
+                agent_state = GTAgentState(
+                    agent_id=UUID(int=hash(self.agent_id) & 0xFFFFFFFFFFFFFFFF),
+                    capital_ratio=self.crar / 10.0,  # Normalize to 0-1 range
+                    liquidity_buffer=self.liquidity / max(self.capital, 1.0),
+                    credit_exposure=self.credit_supply_limit / max(self.capital, 1.0),
+                    default_probability=0.0,  # Will be calculated by ML
+                    stress_level=self.perceived_systemic_stress,
+                    risk_appetite=self.risk_appetite,
+                )
+                
+                # Get ML risk assessment
+                risk_assessment = self.ml_risk_advisor.assess_risk(
+                    agent_id=agent_state.agent_id,
+                    agent_state=agent_state,
+                    network=self._current_network,
+                    all_agent_states=self._all_agent_states,
+                )
+                
+                # Store ML predictions for reporting
+                decisions['ml_default_probability'] = risk_assessment.default_probability
+                decisions['ml_risk_level'] = risk_assessment.current_risk_level.value
+                decisions['ml_confidence'] = risk_assessment.ml_confidence
+                
+                # Apply ML-recommended actions for risk reduction
+                if risk_assessment.recommended_actions:
+                    decisions['ml_recommendations'] = [
+                        {
+                            'action': action.action_type.value,
+                            'magnitude': action.magnitude,
+                            'risk_reduction': action.expected_risk_reduction,
+                            'reasoning': action.reasoning
+                        }
+                        for action in risk_assessment.recommended_actions[:3]  # Top 3
+                    ]
+                    
+                    # Execute ML-guided risk reduction (gradual)
+                    self._execute_ml_risk_reduction(risk_assessment)
+                    decisions['action'] = 'ML_GUIDED_RISK_REDUCTION'
+                
+                # ONLY optimize policies if in distress or high risk
+                # Don't constantly fiddle with policies in normal conditions
+                from app.ml.risk_mitigation import RiskLevel
+                if risk_assessment.current_risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]:
+                    current_policies = {
+                        'credit_supply_limit': self.credit_supply_limit / max(self.capital, 1.0),
+                        'risk_appetite': self.risk_appetite,
+                        'interbank_limit': self.interbank_limit / max(self.capital, 1.0),
+                    }
+                    
+                    optimized_policies = self.ml_risk_advisor.optimize_policy_parameters(
+                        agent_state=agent_state,
+                        risk_assessment=risk_assessment,
+                        current_policies=current_policies,
+                    )
+                    
+                    # Apply optimized policies GRADUALLY (blend with current)
+                    # Move only 20% of the way toward optimal each step
+                    blend_factor = 0.2
+                    target_credit = optimized_policies['credit_supply_limit'] * self.capital
+                    target_risk_app = optimized_policies['risk_appetite']
+                    target_interbank = optimized_policies['interbank_limit'] * self.capital
+                    
+                    self.credit_supply_limit = self.credit_supply_limit * (1 - blend_factor) + target_credit * blend_factor
+                    self.risk_appetite = self.risk_appetite * (1 - blend_factor) + target_risk_app * blend_factor
+                    self.interbank_limit = self.interbank_limit * (1 - blend_factor) + target_interbank * blend_factor
+                    
+                    decisions['optimized_policies'] = optimized_policies
+                else:
+                    # In normal/low risk, just maintain current policies
+                    decisions['action'] = 'STEADY_STATE_ML'
+                
+            except Exception as e:
+                logger.warning(f"ML risk advisor failed for {self.agent_id}: {e}")
+                # Fall back to traditional strategy
+                self._traditional_decision_strategy(decisions)
         else:
-            # Normal Mode
-            self.mode = AgentMode.NORMAL
-            decisions['action'] = 'STEADY_STATE'
+            # Traditional strategy if ML not available
+            self._traditional_decision_strategy(decisions)
         
         decisions['credit_supply_limit'] = self.credit_supply_limit
         decisions['risk_appetite'] = self.risk_appetite
         decisions['interbank_limit'] = self.interbank_limit
         
         return decisions
+    
+    def _traditional_decision_strategy(self, decisions: Dict[str, Any]):
+        """
+        Enhanced risk-responsive strategy (fallback when ML not available).
+        Makes proactive policy adjustments based on health metrics.
+        """
+        # Compute current health status
+        current_health = self.compute_health()
+        
+        # CRITICAL DISTRESS: CRAR below minimum
+        if self.crar < self.regulatory_min_crar:
+            self.mode = AgentMode.DISTRESS
+            # Emergency deleveraging - aggressive but gradual
+            self.credit_supply_limit *= 0.7  # Don't crash to 0.5, be gradual
+            self.interbank_limit *= 0.5
+            self.risk_appetite = max(0.15, self.risk_appetite * 0.5)  # Don't go to 0.1 immediately
+            decisions['action'] = 'EMERGENCY_DELEVERAGING'
+            logger.warning(f"{self.agent_id}: CRITICAL DISTRESS - CRAR {self.crar:.2f}% below min {self.regulatory_min_crar:.2f}%")
+        
+        # HIGH RISK: Health below 40% or significant system stress
+        elif current_health < 0.4 or self.perceived_systemic_stress > 0.6 or self.neighbor_defaults > 0:
+            self.mode = AgentMode.DEFENSIVE
+            # Proactive risk reduction
+            self.credit_supply_limit *= 0.85  # More gradual reduction
+            self.interbank_limit *= 0.7
+            self.risk_appetite = max(0.3, self.risk_appetite * 0.8)
+            
+            # Build liquidity buffer
+            if self.liquidity / max(self.capital, 1.0) < 0.25:
+                # Redirect some lending capacity to liquidity
+                liquidity_target = self.capital * 0.25
+                liquidity_gap = max(0, liquidity_target - self.liquidity)
+                self.liquidity += min(liquidity_gap * 0.2, self.capital * 0.05)  # Gradual increase
+            
+            decisions['action'] = 'DEFENSIVE_RISK_REDUCTION'
+            logger.info(f"{self.agent_id}: DEFENSIVE MODE - Health {current_health:.2f}, Stress {self.perceived_systemic_stress:.2f}")
+        
+        # MODERATE RISK: Health 40-60% or moderate stress
+        elif current_health < 0.6 or self.perceived_systemic_stress > 0.4:
+            self.mode = AgentMode.NORMAL
+            # Cautious adjustments
+            
+                # Reduce NPA exposure if high
+            if self.npa_ratio > 5.0:  # Above 5% NPA
+                self.credit_supply_limit *= 0.92  # Slight reduction
+                self.risk_appetite = max(0.4, self.risk_appetite * 0.9)
+                decisions['action'] = 'CAUTIOUS_DELEVERAGING'
+            else:
+                decisions['action'] = 'STEADY_STATE'
+            
+            # Ensure minimum liquidity buffer
+            min_liquidity_ratio = 0.15
+            if self.liquidity / max(self.capital, 1.0) < min_liquidity_ratio:
+                liquidity_increase = self.capital * 0.02  # Small gradual increase
+                self.liquidity += liquidity_increase
+                decisions['liquidity_action'] = 'BUILD_BUFFER'
+            
+            logger.debug(f"{self.agent_id}: MODERATE RISK - Health {current_health:.2f}")
+        
+        # LOW RISK: Healthy conditions, can expand cautiously
+        elif current_health > 0.7 and self.perceived_systemic_stress < 0.3 and self.crar > self.regulatory_min_crar + 3:
+            self.mode = AgentMode.AGGRESSIVE
+            # Measured expansion (not reckless)
+            self.credit_supply_limit *= 1.05  # Modest expansion
+            self.risk_appetite = min(0.8, self.risk_appetite * 1.1)  # Cap at 0.8, not 0.9
+            decisions['action'] = 'MEASURED_EXPANSION'
+            logger.debug(f"{self.agent_id}: EXPANDING - Health {current_health:.2f}, CRAR {self.crar:.2f}%")
+        
+        else:
+            # Normal Mode - maintain status quo
+            self.mode = AgentMode.NORMAL
+            decisions['action'] = 'STEADY_STATE'
+            
+            # Still do minor adjustments for risk management
+            # If NPA is creeping up, be slightly more conservative
+            if self.npa_ratio > 3.0:
+                self.risk_appetite = max(0.4, self.risk_appetite * 0.95)
+                decisions['micro_adjustment'] = 'NPA_RESPONSE'
+    
+    def _execute_ml_risk_reduction(self, risk_assessment):
+        """
+        Execute ML-recommended risk reduction actions.
+        Focus on CAPITAL PRESERVATION and gradual adjustments.
+        """
+        from app.ml.risk_mitigation import RiskLevel
+        
+        # CRITICAL: Don't make changes that reduce capital or income
+        # Only take the top 1-2 most impactful actions, and do them gradually
+        top_actions = risk_assessment.recommended_actions[:2]
+        
+        for action in top_actions:
+            if action.action_type.value == 'liquidity_decision' and action.magnitude > 0:
+                # Gradual liquidity building - only if we have capacity
+                if self.liquidity / max(self.capital, 1.0) < 0.5:
+                    # Small, gradual increase (max 5% of capital)
+                    liquidity_increase = min(action.magnitude * self.capital * 0.05, self.capital * 0.05)
+                    self.liquidity += liquidity_increase
+                    # DON'T reduce credit limit - maintain income
+                    logger.info(f"{self.agent_id}: Increased liquidity by {liquidity_increase:.2f}")
+            
+            elif action.action_type.value == 'adjust_credit_limit' and action.magnitude < 0:
+                # Very gradual credit reduction (max 5% per step)
+                reduction = max(action.magnitude, -0.05)
+                self.credit_supply_limit *= (1 + reduction)
+                logger.info(f"{self.agent_id}: Reduced credit limit by {-reduction * 100:.1f}%")
+            
+            elif action.action_type.value == 'modify_margin':
+                # Gradual margin increase (max 50 bps per step)
+                margin_increase = min(action.magnitude * 100, 50)
+                self.lending_spread += margin_increase
+                logger.info(f"{self.agent_id}: Increased lending spread by {margin_increase:.0f} bps")
+        
+        # Set mode based on ML risk assessment - but don't panic
+        if risk_assessment.current_risk_level == RiskLevel.CRITICAL and self.crar < self.regulatory_min_crar:
+            self.mode = AgentMode.DISTRESS
+        elif risk_assessment.current_risk_level == RiskLevel.HIGH:
+            self.mode = AgentMode.DEFENSIVE
+        else:
+            self.mode = AgentMode.NORMAL
     
     def act(self, network: 'nx.DiGraph') -> List[Dict[str, Any]]:
         """
@@ -292,12 +482,17 @@ class BankAgent(Agent):
         crar_health = min(1.0, max(0.0, (self.crar - self.regulatory_min_crar) / 10.0))
         
         # Liquidity component: normalized
-        liquidity_health = min(1.0, self.liquidity / (self.capital * 0.2))  # 20% of capital is "good"
+        if self.capital > 0:
+            liquidity_health = min(1.0, self.liquidity / (self.capital * 0.2))  # 20% of capital is "good"
+        else:
+            liquidity_health = 0.0  # No capital = no liquidity health
         
         # NPA component: inverse relationship
         npa_health = max(0.0, 1.0 - (self.npa_ratio / 15.0))  # 15% NPA = 0 health
         
-        return (crar_health * 0.5 + liquidity_health * 0.3 + npa_health * 0.2)
+        # Clamp final health to [0, 1] range
+        health = crar_health * 0.5 + liquidity_health * 0.3 + npa_health * 0.2
+        return min(1.0, max(0.0, health))
     
     def apply_shock(self, loss_amount: float, source: str = "market"):
         """
@@ -354,10 +549,20 @@ class CCPAgent(Agent):
         # Custom User Rules (Injected via API)
         self.policy_rules: List[Dict[str, Any]] = []
         
+        # ML Integration
+        self.ml_risk_advisor = None
+        self._current_network = None
+        self._current_global_state = None
+        self._all_agent_states = {}
+        
     def perceive(self, network: 'nx.DiGraph', global_state: Dict[str, Any]) -> None:
         """
         CCP observes system-wide stress.
         """
+        # Store references for ML processing
+        self._current_network = network
+        self._current_global_state = global_state
+        
         # Calculate total system NPA
         total_npa = 0.0
         bank_count = 0
@@ -373,22 +578,143 @@ class CCPAgent(Agent):
         
     def decide(self) -> Dict[str, Any]:
         """
-        Execute user-defined policy rules.
-        Example Rule: IF system_npa > 8% THEN increase_haircuts_by 5%
+        CCP decision-making with ML-guided risk reduction.
+        Uses ML to predict systemic risk and adjust margin requirements.
         """
         decisions = {}
         
-        # Execute custom rules
+        # Use ML risk advisor if available
+        if self.ml_risk_advisor and self._current_network:
+            try:
+                # Assess network-wide risk
+                bank_risks = []
+                for node_id, data in self._current_network.nodes(data=True):
+                    agent = data.get('agent')
+                    if isinstance(agent, BankAgent) and agent.alive:
+                        from app.engine.game_theory import AgentState as GTAgentState
+                        from uuid import UUID
+                        
+                        agent_state = GTAgentState(
+                            agent_id=UUID(int=hash(agent.agent_id) & 0xFFFFFFFFFFFFFFFF),
+                            capital_ratio=agent.crar / 10.0,
+                            liquidity_buffer=agent.liquidity / max(agent.capital, 1.0),
+                            credit_exposure=agent.credit_supply_limit / max(agent.capital, 1.0),
+                            default_probability=0.0,
+                            stress_level=agent.perceived_systemic_stress,
+                            risk_appetite=agent.risk_appetite,
+                        )
+                        
+                        risk_assessment = self.ml_risk_advisor.assess_risk(
+                            agent_id=agent_state.agent_id,
+                            agent_state=agent_state,
+                            network=self._current_network,
+                            all_agent_states=self._all_agent_states,
+                        )
+                        bank_risks.append(risk_assessment.default_probability)
+                
+                # Calculate system-wide risk
+                avg_default_prob = np.mean(bank_risks) if bank_risks else 0.0
+                max_default_prob = max(bank_risks) if bank_risks else 0.0
+                
+                decisions['avg_system_risk'] = avg_default_prob
+                decisions['max_member_risk'] = max_default_prob
+                
+                # Adjust margins based on ML predictions
+                if avg_default_prob > 0.4:  # High systemic risk
+                    margin_increase = min(0.2, (avg_default_prob - 0.4) * 0.5)
+                    self.initial_margin_requirement *= (1 + margin_increase)
+                    decisions['action'] = 'INCREASE_MARGINS'
+                    decisions['margin_adjustment'] = margin_increase
+                    logger.info(f"CCP: Increased margins by {margin_increase * 100:.1f}% due to high systemic risk")
+                
+                elif avg_default_prob < 0.15:  # Low risk
+                    margin_decrease = min(0.1, (0.15 - avg_default_prob) * 0.3)
+                    self.initial_margin_requirement *= (1 - margin_decrease)
+                    decisions['action'] = 'REDUCE_MARGINS'
+                    decisions['margin_adjustment'] = -margin_decrease
+                    logger.info(f"CCP: Reduced margins by {margin_decrease * 100:.1f}% due to low risk")
+                
+                else:
+                    decisions['action'] = 'MAINTAIN_MARGINS'
+                
+            except Exception as e:
+                logger.warning(f"ML risk advisor failed for CCP: {e}")
+                # Fall back to rule-based system
+                self._execute_policy_rules(decisions)
+        else:
+            # Execute traditional rule-based system
+            self._execute_policy_rules(decisions)
+        
+        return decisions
+    
+    def _execute_policy_rules(self, decisions: Dict[str, Any]):
+        """
+        Execute risk-responsive policy adjustments (fallback when ML not available).
+        CCPs proactively adjust margins based on system health.
+        """
+        # Calculate system health metrics
+        if self._current_network:
+            alive_banks = []
+            total_banks = 0
+            total_npa = 0.0
+            avg_crar = 0.0
+            
+            for node_id, data in self._current_network.nodes(data=True):
+                agent = data.get('agent')
+                if isinstance(agent, BankAgent):
+                    total_banks += 1
+                    if agent.alive:
+                        alive_banks.append(agent)
+                        total_npa += agent.npa_ratio
+                        avg_crar += agent.crar
+            
+            if alive_banks:
+                survival_rate = len(alive_banks) / max(total_banks, 1)
+                avg_npa = total_npa / len(alive_banks)
+                avg_crar = avg_crar / len(alive_banks)
+                
+                # DEFENSIVE: System under stress
+                if survival_rate < 0.7 or avg_npa > 8.0 or avg_crar < 11.0:
+                    # Increase margins to protect against further defaults
+                    margin_increase = 0.15  # 15% increase
+                    self.initial_margin_requirement *= (1 + margin_increase)
+                    # Also increase default fund contribution
+                    self.default_fund_size *= 1.1
+                    decisions['action'] = 'DEFENSIVE_MARGIN_INCREASE'
+                    decisions['reason'] = f'System stress: {survival_rate*100:.1f}% survival, {avg_npa:.1f}% NPA'
+                    logger.warning(f"CCP: DEFENSIVE MODE - Increased margins by {margin_increase*100:.1f}%")
+                
+                # CAUTIOUS: Moderate risk
+                elif survival_rate < 0.85 or avg_npa > 5.0:
+                    # Small margin increase
+                    margin_increase = 0.05
+                    self.initial_margin_requirement *= (1 + margin_increase)
+                    decisions['action'] = 'CAUTIOUS_MARGIN_INCREASE'
+                    logger.info(f"CCP: CAUTIOUS - Slightly increased margins")
+                
+                # RELAXED: Low risk environment
+                elif survival_rate > 0.95 and avg_npa < 2.0 and avg_crar > 13.0:
+                    # Can reduce margins slightly
+                    margin_decrease = 0.03
+                    self.initial_margin_requirement *= (1 - margin_decrease)
+                    decisions['action'] = 'MARGIN_RELAXATION'
+                    logger.info(f"CCP: Low risk - Relaxed margins by {margin_decrease*100:.1f}%")
+                
+                else:
+                    decisions['action'] = 'MAINTAIN_MARGINS'
+                
+                # Ensure margins don't go too high or too low
+                self.initial_margin_requirement = min(0.30, max(0.03, self.initial_margin_requirement))
+                decisions['current_margin'] = self.initial_margin_requirement
+                
+        # Execute any custom user-defined rules
         for rule in self.policy_rules:
-            # Rule execution logic (simplified)
             condition = rule.get('condition', lambda state: False)
             action = rule.get('action', lambda: {})
             
             if condition(self):
                 action_result = action()
                 decisions.update(action_result)
-        
-        return decisions
     
     def act(self, network: 'nx.DiGraph') -> List[Dict[str, Any]]:
         """
@@ -422,7 +748,7 @@ class CCPAgent(Agent):
             return 1.0
         
         coverage = self.default_fund_size / self.active_exposures
-        return min(1.0, coverage)
+        return min(1.0, max(0.0, coverage))
     
     def add_policy_rule(self, rule: Dict[str, Any]):
         """Allow user to inject custom policy rules"""
@@ -484,6 +810,7 @@ class SectorAgent(Agent):
     def act(self, network: 'nx.DiGraph') -> List[Dict[str, Any]]:
         """
         Sectors generate losses for connected banks based on health.
+        REDUCED SEVERITY for more stable simulations.
         """
         events = []
         
@@ -495,12 +822,13 @@ class SectorAgent(Agent):
             bank = network.nodes[predecessor].get('agent')
             if isinstance(bank, BankAgent) and bank.alive:
                 # If sector health drops, banks take proportional loss
-                if self.economic_health < 0.7:  # Stress threshold
-                    loss_rate = (0.7 - self.economic_health) * 0.1  # Max 7% loss if health=0
+                # BUT MUCH LESS SEVERE - only when health is really bad
+                if self.economic_health < 0.5:  # Stress threshold (was 0.7)
+                    loss_rate = (0.5 - self.economic_health) * 0.02  # Max 1% loss (was 7%)
                     loss_amount = exposure * loss_rate
                     
                     bank.apply_shock(loss_amount, source=f"sector_{self.sector_name}")
-                    bank.npa_ratio += loss_rate * 100  # Increase NPA
+                    bank.npa_ratio += loss_rate * 50  # Less NPA increase
                     
                     events.append({
                         'type': 'SECTOR_LOSS_PROPAGATION',
@@ -516,7 +844,7 @@ class SectorAgent(Agent):
         """
         Sector health is directly the economic_health variable.
         """
-        return self.economic_health
+        return min(1.0, max(0.0, self.economic_health))
 
 
 class RegulatorAgent(Agent):
@@ -588,4 +916,4 @@ class RegulatorAgent(Agent):
         """
         Regulator health is system liquidity.
         """
-        return self.system_liquidity
+        return min(1.0, max(0.0, self.system_liquidity))
