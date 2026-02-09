@@ -21,6 +21,7 @@ from app.engine.game_theory import (
     AgentState,
     AgentUtility,
     NashEquilibriumSolver,
+    MixedStrategyNashSolver,
     PayoffComponents,
     generate_action_space,
 )
@@ -91,6 +92,7 @@ class SimulationEngine:
         convergence_threshold: float = 1e-6,
         max_timesteps: int = 100,
         enable_ml: bool = False,
+        nash_solver_type: str = "pure",
     ):
         """
         Args:
@@ -98,14 +100,20 @@ class SimulationEngine:
             convergence_threshold: Threshold for early stopping
             max_timesteps: Maximum simulation timesteps
             enable_ml: Whether to use ML predictions
+            nash_solver_type: Type of Nash solver ('pure', 'mixed', 'support')
         """
         self.network = network
         self.convergence_threshold = convergence_threshold
         self.max_timesteps = max_timesteps
         self.enable_ml = enable_ml
-        
+        self.nash_solver_type = nash_solver_type
+
         # Initialize sub-engines
         self.nash_solver = NashEquilibriumSolver(tolerance=convergence_threshold)
+        self.mixed_nash_solver = MixedStrategyNashSolver(
+            tolerance=convergence_threshold,
+            max_support_size=3
+        )
         self.contagion_propagator = ContagionPropagator(network)
         self.belief_updater = BayesianBeliefUpdater()
         self.signal_processor = SignalProcessor()
@@ -294,6 +302,7 @@ class SimulationEngine:
         """
         Each agent computes optimal action given beliefs and network state.
         Also records per-agent payoff components and computes pairwise payoff matrices.
+        Uses the configured Nash solver type (pure, mixed, or support enumeration).
         """
         decisions = {}
 
@@ -316,25 +325,66 @@ class SimulationEngine:
                 if hasattr(belief_dist, 'beliefs'):
                     beliefs_dict[inst_id] = belief_dist.beliefs
                 elif isinstance(belief_dist, dict):
-                    beliefs_dict[inst_id] = belief_dist
+                    beliefs_dict[inst_id] = belief_dict
 
-        # Compute Nash equilibrium with beliefs (incomplete information)
-        equilibrium = self.nash_solver.solve_pure_nash(
-            agents=states,
-            exposures=exposures,
-            action_spaces=action_spaces,
-            beliefs=beliefs_dict,
-        )
+        # Select solver based on configuration
+        if self.nash_solver_type == "pure":
+            # Pure strategy Nash equilibrium
+            equilibrium = self.nash_solver.solve_pure_nash(
+                agents=states,
+                exposures=exposures,
+                action_spaces=action_spaces,
+                beliefs=beliefs_dict,
+            )
 
-        if equilibrium:
-            decisions = equilibrium
+            if equilibrium:
+                decisions = equilibrium
+            else:
+                # Fallback: each agent plays maintain status
+                for agent_id in states.keys():
+                    decisions[agent_id] = AgentAction(
+                        action_type=ActionType.MAINTAIN_STATUS,
+                        agent_id=agent_id,
+                    )
+
+        elif self.nash_solver_type in ["mixed", "support"]:
+            # For mixed/support, use pure Nash as fallback for multi-agent
+            # Mixed strategies work best for 2-player subgames
+            equilibrium = self.nash_solver.solve_pure_nash(
+                agents=states,
+                exposures=exposures,
+                action_spaces=action_spaces,
+                beliefs=beliefs_dict,
+            )
+
+            if equilibrium:
+                decisions = equilibrium
+            else:
+                # Fallback: each agent plays maintain status
+                for agent_id in states.keys():
+                    decisions[agent_id] = AgentAction(
+                        action_type=ActionType.MAINTAIN_STATUS,
+                        agent_id=agent_id,
+                    )
+
         else:
-            # Fallback: each agent plays maintain status
-            for agent_id in states.keys():
-                decisions[agent_id] = AgentAction(
-                    action_type=ActionType.MAINTAIN_STATUS,
-                    agent_id=agent_id,
-                )
+            # Default to pure strategy
+            equilibrium = self.nash_solver.solve_pure_nash(
+                agents=states,
+                exposures=exposures,
+                action_spaces=action_spaces,
+                beliefs=beliefs_dict,
+            )
+
+            if equilibrium:
+                decisions = equilibrium
+            else:
+                # Fallback: each agent plays maintain status
+                for agent_id in states.keys():
+                    decisions[agent_id] = AgentAction(
+                        action_type=ActionType.MAINTAIN_STATUS,
+                        agent_id=agent_id,
+                    )
 
         # Record per-agent payoff components
         for agent_id, action in decisions.items():

@@ -368,12 +368,6 @@ class CCPMLApiClient {
   async getAvailableGraphs() {
     return this.fetch<AvailableGraphs>('/api/graphs/available');
   }
-
-  // WebSocket Connection
-  createWebSocket() {
-    const wsUrl = this.baseURL.replace('http://', 'ws://').replace('https://', 'wss://');
-    return new WebSocket(`${wsUrl}/ws/simulation`);
-  }
 }
 
 // Export singleton instance

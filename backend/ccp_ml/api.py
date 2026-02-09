@@ -684,38 +684,38 @@ async def get_available_graphs():
     }
 
 # ============================================
-# WebSocket for Real-time Updates
+# WebSocket for Real-time Updates (DISABLED FOR DEMO)
 # ============================================
 
-@app.websocket("/ws/simulation")
-async def websocket_simulation(websocket: WebSocket):
-    """WebSocket endpoint for real-time simulation updates"""
-    await websocket.accept()
-    state.websocket_clients.append(websocket)
-    logger.info(f"WebSocket client connected. Total clients: {len(state.websocket_clients)}")
-    
-    try:
-        while True:
-            # Wait for messages or commands from client
-            data = await websocket.receive_text()
-            command = json.loads(data)
-            
-            if command.get("type") == "ping":
-                await websocket.send_json({"type": "pong"})
-            
-            elif command.get("type") == "subscribe":
-                await websocket.send_json({
-                    "type": "subscribed",
-                    "message": "Subscribed to simulation updates"
-                })
-    
-    except WebSocketDisconnect:
-        state.websocket_clients.remove(websocket)
-        logger.info(f"WebSocket client disconnected. Total clients: {len(state.websocket_clients)}")
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        if websocket in state.websocket_clients:
-            state.websocket_clients.remove(websocket)
+# @app.websocket("/ws/simulation")
+# async def websocket_simulation(websocket: WebSocket):
+#     """WebSocket endpoint for real-time simulation updates"""
+#     await websocket.accept()
+#     state.websocket_clients.append(websocket)
+#     logger.info(f"WebSocket client connected. Total clients: {len(state.websocket_clients)}")
+#     
+#     try:
+#         while True:
+#             # Wait for messages or commands from client
+#             data = await websocket.receive_text()
+#             command = json.loads(data)
+#             
+#             if command.get("type") == "ping":
+#                 await websocket.send_json({"type": "pong"})
+#             
+#             elif command.get("type") == "subscribe":
+#                 await websocket.send_json({
+#                     "type": "subscribed",
+#                     "message": "Subscribed to simulation updates"
+#                 })
+#     
+#     except WebSocketDisconnect:
+#         state.websocket_clients.remove(websocket)
+#         logger.info(f"WebSocket client disconnected. Total clients: {len(state.websocket_clients)}")
+#     except Exception as e:
+#         logger.error(f"WebSocket error: {e}")
+#         if websocket in state.websocket_clients:
+#             state.websocket_clients.remove(websocket)
 
 # ============================================
 # Run Server

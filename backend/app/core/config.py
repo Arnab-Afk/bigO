@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "RUDRA"
     APP_VERSION: str = "0.1.0"
     APP_DESCRIPTION: str = "Resilient Unified Decision & Risk Analytics"
-    DEBUG: bool = False
+    DEBUG: bool = True
     ENVIRONMENT: str = "development"
     
     # API
@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     MAX_SIMULATION_TIMESTEPS: int = 1000
     MONTE_CARLO_DEFAULT_RUNS: int = 1000
     SIMULATION_TIMEOUT_SECONDS: int = 3600
+    
+    # LLM / Featherless AI
+    FEATHERLESS_API_KEY: Optional[str] = None
+    FEATHERLESS_MODEL: str = "meta-llama/Meta-Llama-3.1-70B-Instruct"
+    FEATHERLESS_API_BASE: str = "https://api.featherless.ai/v1"
     
     # Logging
     LOG_LEVEL: str = "INFO"

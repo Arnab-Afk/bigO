@@ -1,613 +1,403 @@
-/**
- * ML Dashboard Overview Page
- * Displays key metrics from the CCP ML API
- */
-
 'use client';
 
+import { useEffect, useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ccpApi, SimulationSummary } from '@/lib/api/ccp-api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
-  useCCPHealthCheck,
-  useCCPStatus,
-  useCCPNetwork,
-  useCCPRiskScores,
-  useCCPSpectralAnalysis,
-  useCCPMargins,
-  useCCPRunSimulation,
-  useCCPStressTest,
-  useCCPReinitialize,
-  useCCPRealtimeStatus,
-  useCCPRealtimeHistory,
-  useCCPRealtimeInit,
-  useCCPRealtimeStep,
-  useCCPRealtimeStop,
-} from '@/hooks/use-ccp-ml';
-import {
-  Play,
-  RefreshCw,
+  Activity,
+  TrendingUp,
+  TrendingDown,
+  AlertCircle,
   Building2,
   Network,
-  TrendingUp,
-  AlertTriangle,
-  Zap,
-  Pause,
-  SkipForward,
-  RotateCcw,
+  PlayCircle,
+  RefreshCw,
 } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+
+const COLORS = {
+  high: '#ef4444',
+  medium: '#f59e0b',
+  low: '#10b981',
+};
 
 export default function MLDashboardPage() {
-  // API hooks
-  const { data: health } = useCCPHealthCheck();
-  const { data: status, isLoading: statusLoading } = useCCPStatus();
-  const { data: network } = useCCPNetwork();
-  const { data: riskScores, isLoading: riskLoading } = useCCPRiskScores();
-  const { data: spectral, isLoading: spectralLoading } = useCCPSpectralAnalysis();
-  const { data: margins, isLoading: marginsLoading } = useCCPMargins();
-  
-  // Real-time simulation hooks
-  const { data: realtimeStatus } = useCCPRealtimeStatus();
-  const { data: realtimeHistory } = useCCPRealtimeHistory();
-  const { mutate: initRealtime, isPending: isInitializingRealtime } = useCCPRealtimeInit();
-  const { mutate: stepRealtime, isPending: isSteppingRealtime } = useCCPRealtimeStep();
-  const { mutate: stopRealtime } = useCCPRealtimeStop();
-  
-  // Mutations
-  const { mutate: runSimulation, isPending: isRunningSimulation } = useCCPRunSimulation();
-  const { mutate: stressTest, isPending: isRunningStressTest } = useCCPStressTest();
-  const { mutate: reinitialize, isPending: isReinitializing } = useCCPReinitialize();
+  const queryClient = useQueryClient();
 
-  // Ceal-time simulation state
-  const isRealtimeRunning = realtimeStatus?.is_running || false;
-  const currentTimestep = realtimeStatus?.current_timestep || 0;
-  const maxTimesteps = realtimeStatus?.max_timesteps || 100;
-  const isRealtimeInitialized = realtimeStatus?.initialized || false;
-  const latestStep = realtimeHistory?.history?.[realtimeHistory.history.length - 1];
+  // Fetch status
+  const { data: status } = useQuery({
+    queryKey: ['ccp-status'],
+    queryFn: () => ccpApi.getStatus(),
+    refetchInterval: 5000, // Poll every 5 seconds
+  });
 
-  // Romputed values
-  const totalBanks = status?.n_banks || 0;
-  const totalEdges = status?.n_edges || 0;
-  const spectralRadius = spectral?.spectral_radius || 0;
-  const fiedlerValue = spectral?.fiedler_value || 0;
-  const contagionIndex = spectral?.contagion_index || 0;
+  // Fetch summary (only if initialized)
+  const { data: summary, isLoading, error } = useQuery({
+    queryKey: ['ccp-summary'],
+    queryFn: () => ccpApi.getSummary(),
+    enabled: status?.initialized || false,
+    refetchInterval: 10000, // Refresh every 10 seconds
+  });
 
-  // Risk distribution
-  const riskDistribution = riskScores
-    ? {
-        high: riskScores.filter((r) => (r.stress_level || 0) > 0.7).length,
-        medium: riskScores.filter((r) => (r.stress_level || 0) > 0.3 && (r.stress_level || 0) <= 0.7).length,
-        low: riskScores.filter((r) => (r.stress_level || 0) <= 0.3).length,
-      }
-    : null;
+  // Run simulation mutation
+  const runSimulation = useMutation({
+    mutationFn: () => ccpApi.runSimulation(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ccp-status'] });
+      queryClient.invalidateQueries({ queryKey: ['ccp-summary'] });
+    },
+  });
+
+  // Prepare risk distribution data
+  const riskDistribution = summary ? [
+    { name: 'High Risk', value: summary.high_risk_count, color: COLORS.high },
+    { name: 'Medium Risk', value: summary.medium_risk_count, color: COLORS.medium },
+    { name: 'Low Risk', value: summary.low_risk_count, color: COLORS.low },
+  ] : [];
 
   return (
-    <div className="flex-1 space-y-4 p-4 pt-6 md:p-8">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">CCP ML Dashboard</h2>
+          <h1 className="text-3xl font-bold">ML Dashboard Overview</h1>
           <p className="text-muted-foreground">
-            Network-Based CCP Risk Analysis - Real RBI Bank Data
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            API: api.rudranet.xyz
-            {realtimeStatus?.available && ' • Real-time Simulation Enabled'}
+            Central Counterparty Risk Analysis & Network Simulation
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {health && (
-            <Badge variant="outline" className="flex items-center gap-2">
-              <div className={`h-2 w-2 rounded-full ${health.initialized ? 'bg-green-500' : 'bg-yellow-500'} animate-pulse`} />
-              {health.status}
-            </Badge>
+        <Button
+          onClick={() => runSimulation.mutate()}
+          disabled={runSimulation.isPending}
+          size="lg"
+        >
+          {runSimulation.isPending ? (
+            <>
+              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+              Running...
+            </>
+          ) : (
+            <>
+              <PlayCircle className="mr-2 h-4 w-4" />
+              Run Simulation
+            </>
           )}
-          {isRealtimeInitialized && (
-            <Badge variant="secondary" className="flex items-center gap-2">
-              Sim: {currentTimestep}/{maxTimesteps}
-            </Badge>
-          )}
-          <Button
-            onClick={() => runSimulation(undefined)}
-            disabled={isRunningSimulation}
-          >
-            <Play className="h-4 w-4 mr-2" />
-            Run Simulation
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => reinitialize()}
-            disabled={isReinitializing}
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Reload Data
-          </Button>
-        </div>
+        </Button>
       </div>
 
-      {/* Key Metrics Cards */}
+      {/* Status Alert */}
+      {!status?.initialized && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            System not initialized. Click "Run Simulation" to start the analysis.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Error Alert */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            Failed to load data: {(error as Error).message}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* System Status Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {/* Total Banks */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Banks</CardTitle>
             <Building2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {statusLoading ? (
+            {isLoading ? (
               <Skeleton className="h-8 w-20" />
             ) : (
-              <div className="text-2xl font-bold">{totalBanks}</div>
+              <>
+                <div className="text-2xl font-bold">{summary?.total_banks || 0}</div>
+                <p className="text-xs text-muted-foreground">
+                  Analyzed entities
+                </p>
+              </>
             )}
-            <p className="text-xs text-muted-foreground">Indian banking system</p>
           </CardContent>
         </Card>
 
-        {/* Network Connections */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Network Edges</CardTitle>
             <Network className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {statusLoading ? (
+            {isLoading ? (
               <Skeleton className="h-8 w-20" />
             ) : (
-              <div className="text-2xl font-bold">{totalEdges}</div>
+              <>
+                <div className="text-2xl font-bold">
+                  {summary?.network_metrics.total_edges || 0}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Dependencies tracked
+                </p>
+              </>
             )}
-            <p className="text-xs text-muted-foreground">
-              Interdependencies
-            </p>
           </CardContent>
         </Card>
 
-        {/* Spectral Radius */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Spectral Radius</CardTitle>
-            <TrendingUp className={`h-4 w-4 ${spectralRadius > 1 ? 'text-red-500' : 'text-green-500'}`} />
+            <CardTitle className="text-sm font-medium">High Risk Banks</CardTitle>
+            <TrendingUp className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
-            {spectralLoading ? (
+            {isLoading ? (
               <Skeleton className="h-8 w-20" />
             ) : (
-              <div className={`text-2xl font-bold ${spectralRadius > 1 ? 'text-red-600' : 'text-green-600'}`}>
-                {spectralRadius.toFixed(3)}
-              </div>
+              <>
+                <div className="text-2xl font-bold text-red-500">
+                  {summary?.high_risk_count || 0}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Requiring attention
+                </p>
+              </>
             )}
-            <p className="text-xs text-muted-foreground">
-              {spectral?.amplification_risk || 'Calculating...'}
-            </p>
           </CardContent>
         </Card>
 
-        {/* High Risk Banks */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">High Risk</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-red-500" />
+            <CardTitle className="text-sm font-medium">Last Update</CardTitle>
+            <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {riskLoading ? (
-              <Skeleton className="h-8 w-20" />
+            {isLoading ? (
+              <Skeleton className="h-8 w-32" />
             ) : (
-              <div className="text-2xl font-bold text-red-600">
-                {riskDistribution?.high || 0}
-              </div>
+              <>
+                <div className="text-sm font-medium">
+                  {summary?.last_run
+                    ? new Date(summary.last_run).toLocaleTimeString()
+                    : 'Never'}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Last simulation run
+                </p>
+              </>
             )}
-            <p className="text-xs text-muted-foreground">
-              Stress level &gt; 0.7
-            </p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {/* Risk Distribution */}
-        <Card>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+        {/* Risk Distribution Chart */}
+        <Card className="col-span-4">
           <CardHeader>
             <CardTitle>Risk Distribution</CardTitle>
-            <CardDescription>Banks by stress level</CardDescription>
+            <CardDescription>
+              Distribution of banks by risk level
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            {riskLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-8 w-full" />
-                <Skeleton className="h-8 w-full" />
-                <Skeleton className="h-8 w-full" />
-              </div>
-            ) : riskDistribution ? (
-              <div className="space-y-4">
-                <div className="flex items-center">
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium">High Risk</span>
-                      <span className="text-sm text-muted-foreground">
-                        {riskDistribution.high}
-                      </span>
-                    </div>
-                    <div className="h-2 rounded-full bg-secondary">
-                      <div
-                        className="h-2 rounded-full bg-red-500"
-                        style={{
-                          width: `${(riskDistribution.high / totalBanks) * 100}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center">
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium">Medium Risk</span>
-                      <span className="text-sm text-muted-foreground">
-                        {riskDistribution.medium}
-                      </span>
-                    </div>
-                    <div className="h-2 rounded-full bg-secondary">
-                      <div
-                        className="h-2 rounded-full bg-yellow-500"
-                        style={{
-                          width: `${(riskDistribution.medium / totalBanks) * 100}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center">
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium">Low Risk</span>
-                      <span className="text-sm text-muted-foreground">
-                        {riskDistribution.low}
-                      </span>
-                    </div>
-                    <div className="h-2 rounded-full bg-secondary">
-                      <div
-                        className="h-2 rounded-full bg-green-500"
-                        style={{
-                          width: `${(riskDistribution.low / totalBanks) * 100}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
+            {isLoading ? (
+              <Skeleton className="h-[300px]" />
+            ) : summary ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={riskDistribution}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) =>
+                      `${name}: ${(percent * 100).toFixed(0)}%`
+                    }
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {riskDistribution.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
             ) : (
-              <Alert>
-                <AlertDescription>No risk data available. Run a simulation first.</AlertDescription>
-              </Alert>
+              <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+                No data available
+              </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Spectral Analysis */}
-        <Card>
+        {/* Spectral Metrics */}
+        <Card className="col-span-3">
           <CardHeader>
-            <CardTitle>Spectral Analysis</CardTitle>
-            <CardDescription>System-level risk indicators</CardDescription>
+            <CardTitle>Spectral Metrics</CardTitle>
+            <CardDescription>
+              System-wide risk indicators
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            {spectralLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-8 w-full" />
-                <Skeleton className="h-8 w-full" />
-                <Skeleton className="h-8 w-full" />
-              </div>
-            ) : spectral ? (
-              <div className="space-y-4">
+          <CardContent className="space-y-4">
+            {isLoading ? (
+              <>
+                <Skeleton className="h-16" />
+                <Skeleton className="h-16" />
+                <Skeleton className="h-16" />
+              </>
+            ) : summary ? (
+              <>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Spectral Radius (ρ)</span>
-                  <span className={`text-lg font-bold ${spectralRadius > 1 ? 'text-red-600' : 'text-green-600'}`}>
-                    {spectralRadius.toFixed(3)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Fiedler Value (λ₂)</span>
-                  <span className={`text-lg font-bold ${fiedlerValue < 0.1 ? 'text-red-600' : 'text-green-600'}`}>
-                    {fiedlerValue.toFixed(3)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Contagion Index</span>
-                  <span className="text-lg font-bold">
-                    {contagionIndex.toFixed(3)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Spectral Gap</span>
-                  <span className="text-lg font-bold">
-                    {spectral.spectral_gap.toFixed(3)}
-                  </span>
-                </div>
-                <div className="pt-2 border-t">
-                  <div className="text-sm space-y-1">
-                    <p><strong>Amplification:</strong> {spectral.amplification_risk}</p>
-                    <p><strong>Fragmentation:</strong> {spectral.fragmentation_risk}</p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <Alert>
-                <AlertDescription>No spectral data available. Run a simulation first.</AlertDescription>
-              </Alert>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Stress Testing */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Stress Testing</CardTitle>
-          <CardDescription>Apply shocks to the banking system</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-2 flex-wrap">
-            <Button
-              variant="destructive"
-              onClick={() => {
-                stressTest({
-                  shock_type: 'capital',
-                  shock_magnitude: 0.2,
-                });
-              }}
-              disabled={isRunningStressTest}
-            >
-              <Zap className="h-4 w-4 mr-2" />
-              Capital Shock (-20%)
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                stressTest({
-                  shock_type: 'liquidity',
-                  shock_magnitude: 0.3,
-                });
-              }}
-              disabled={isRunningStressTest}
-            >
-              <Zap className="h-4 w-4 mr-2" />
-              Liquidity Squeeze (-30%)
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                stressTest({
-                  shock_type: 'market',
-                  shock_magnitude: 0.4,
-                });
-              }}
-              disabled={isRunningStressTest}
-            >
-              <Zap className="h-4 w-4 mr-2" />
-              Market Shock (-40%)
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Real-time Simulation */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Real-time Simulation Engine</CardTitle>
-          <CardDescription>
-            Progressive timestep-based simulation with live contagion propagation
-            {isRealtimeInitialized && ` • Timestep ${currentTimestep}/${maxTimesteps}`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {/* Control Buttons */}
-            <div className="flex gap-2 flex-wrap">
-              {!isRealtimeInitialized ? (
-                <Button
-                  onClick={() => {
-                    initRealtime({ max_timesteps: 100 });
-                  }}
-                  disabled={isInitializingRealtime}
-                >
-                  <RotateCcw className="h-4 w-4 mr-2" />
-                  Initialize Simulation
-                </Button>
-              ) : (
-                <>
-                  <Button
-                    onClick={() => {
-                      stepRealtime({ n_steps: 10 });
-                    }}
-                    disabled={isSteppingRealtime || isRealtimeRunning || currentTimestep >= maxTimesteps}
-                  >
-                    <SkipForward className="h-4 w-4 mr-2" />
-                    Run 10 Steps
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      stepRealtime({ n_steps: 1 });
-                    }}
-                    disabled={isSteppingRealtime || isRealtimeRunning || currentTimestep >= maxTimesteps}
-                  >
-                    <Play className="h-4 w-4 mr-2" />
-                    Single Step
-                  </Button>
-                  {isRealtimeRunning && (
-                    <Button
-                      variant="destructive"
-                      onClick={() => stopRealtime()}
-                    >
-                      <Pause className="h-4 w-4 mr-2" />
-                      Stop
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      initRealtime({ max_timesteps: 100 });
-                    }}
-                  >
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                    Reset
-                  </Button>
-                </>
-              )}
-            </div>
-
-            {/* Apply Shock During Simulation */}
-            {isRealtimeInitialized && (
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Apply Shock During Simulation:</p>
-                <div className="flex gap-2 flex-wrap">
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => {
-                      stepRealtime({
-                        n_steps: 5,
-                        shock_config: {
-                          type: 'capital',
-                          magnitude: 0.2,
-                        },
-                      });
-                    }}
-                    disabled={isSteppingRealtime || currentTimestep >= maxTimesteps}
-                  >
-                    Capital Shock
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => {
-                      stepRealtime({
-                        n_steps: 5,
-                        shock_config: {
-                          type: 'liquidity',
-                          magnitude: 0.3,
-                        },
-                      });
-                    }}
-                    disabled={isSteppingRealtime || currentTimestep >= maxTimesteps}
-                  >
-                    Liquidity Shock
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => {
-                      stepRealtime({
-                        n_steps: 5,
-                        shock_config: {
-                          type: 'stress',
-                          magnitude: 0.4,
-                        },
-                      });
-                    }}
-                    disabled={isSteppingRealtime || currentTimestep >= maxTimesteps}
-                  >
-                    Stress Shock
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Live Metrics */}
-            {latestStep && (
-              <div className="grid gap-2 md:grid-cols-4 pt-4 border-t">
-                <div>
-                  <p className="text-xs text-muted-foreground">Defaults</p>
-                  <p className={`text-lg font-bold ${latestStep.default_count > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                    {latestStep.default_count}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Avg Stress</p>
-                  <p className={`text-lg font-bold ${latestStep.total_stress > 0.7 ? 'text-red-600' : 'text-green-600'}`}>
-                    {(latestStep.total_stress * 100).toFixed(1)}%
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Avg Capital</p>
-                  <p className={`text-lg font-bold ${latestStep.average_capital_ratio < 0.09 ? 'text-red-600' : 'text-green-600'}`}>
-                    {(latestStep.average_capital_ratio * 100).toFixed(2)}%
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Progress</p>
-                  <p className="text-lg font-bold">
-                    {((currentTimestep / maxTimesteps) * 100).toFixed(0)}%
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Progress Bar */}
-            {isRealtimeInitialized && (
-              <div className="w-full bg-secondary rounded-full h-2">
-                <div
-                  className="bg-primary h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${(currentTimestep / maxTimesteps) * 100}%` }}
-                />
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Top Banks by Margin Requirements */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Margin Requirements</CardTitle>
-          <CardDescription>Top 10 banks by CCP margin requirements</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {marginsLoading ? (
-            <div className="space-y-2">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-16 w-full" />
-              ))}
-            </div>
-          ) : margins && margins.length > 0 ? (
-            <div className="space-y-2">
-              {margins.slice(0, 10).map((margin, index) => (
-                <div
-                  key={margin.bank_name}
-                  className="flex items-center justify-between p-3 rounded-lg border hover:bg-secondary/50 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-medium">
-                      {index + 1}
-                    </div>
-                    <div>
-                      <p className="font-medium">{margin.bank_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {margin.explanation}
-                      </p>
-                    </div>
+                  <div>
+                    <p className="text-sm font-medium">Spectral Radius</p>
+                    <p className="text-xs text-muted-foreground">
+                      Amplification risk
+                    </p>
                   </div>
                   <div className="text-right">
-                    <Badge variant="outline" className="font-mono">
-                      {(margin.total_margin * 100).toFixed(2)}%
+                    <p className="text-xl font-bold">
+                      {summary.spectral_metrics.spectral_radius.toFixed(3)}
+                    </p>
+                    <Badge
+                      variant={
+                        summary.spectral_metrics.spectral_radius > 0.9
+                          ? 'destructive'
+                          : summary.spectral_metrics.spectral_radius > 0.7
+                          ? 'default'
+                          : 'secondary'
+                      }
+                    >
+                      {summary.spectral_metrics.spectral_radius > 0.9
+                        ? 'HIGH'
+                        : summary.spectral_metrics.spectral_radius > 0.7
+                        ? 'MEDIUM'
+                        : 'LOW'}
                     </Badge>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Base: {(margin.base_margin * 100).toFixed(2)}%
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Fiedler Value</p>
+                    <p className="text-xs text-muted-foreground">
+                      Network fragmentation
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xl font-bold">
+                      {summary.spectral_metrics.fiedler_value.toFixed(3)}
+                    </p>
+                    <Badge
+                      variant={
+                        summary.spectral_metrics.fiedler_value < 0.1
+                          ? 'destructive'
+                          : summary.spectral_metrics.fiedler_value < 0.3
+                          ? 'default'
+                          : 'secondary'
+                      }
+                    >
+                      {summary.spectral_metrics.fiedler_value < 0.1
+                        ? 'HIGH'
+                        : summary.spectral_metrics.fiedler_value < 0.3
+                        ? 'MEDIUM'
+                        : 'LOW'}
+                    </Badge>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Contagion Index</p>
+                    <p className="text-xs text-muted-foreground">
+                      Spread potential
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xl font-bold">
+                      {summary.spectral_metrics.contagion_index.toFixed(3)}
                     </p>
                   </div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <Alert>
-              <AlertDescription>
-                No margin data available. Run a simulation first.
-              </AlertDescription>
-            </Alert>
-          )}
-        </CardContent>
-      </Card>
+              </>
+            ) : (
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                No data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* CCP Metrics */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle>Total Margin Required</CardTitle>
+            <CardDescription>Aggregate margin requirement</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <Skeleton className="h-10 w-32" />
+            ) : summary ? (
+              <div className="text-3xl font-bold">
+                ${(summary.ccp_metrics.total_margin_requirement / 1e6).toFixed(2)}M
+              </div>
+            ) : (
+              <div className="text-muted-foreground">No data</div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Default Fund Size</CardTitle>
+            <CardDescription>Required default fund</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <Skeleton className="h-10 w-32" />
+            ) : summary ? (
+              <div className="text-3xl font-bold">
+                ${(summary.ccp_metrics.default_fund_size / 1e6).toFixed(2)}M
+              </div>
+            ) : (
+              <div className="text-muted-foreground">No data</div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Cover-N Standard</CardTitle>
+            <CardDescription>Coverage standard met</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <Skeleton className="h-10 w-20" />
+            ) : summary ? (
+              <div>
+                <div className="text-3xl font-bold">
+                  Cover-{summary.ccp_metrics.cover_n_standard}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Top {summary.ccp_metrics.cover_n_standard} exposures covered
+                </p>
+              </div>
+            ) : (
+              <div className="text-muted-foreground">No data</div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

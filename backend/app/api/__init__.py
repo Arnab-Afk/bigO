@@ -1,7 +1,11 @@
 """API routes package"""
 from fastapi import APIRouter
 
-from app.api.v1 import institutions, exposures, network, simulations, scenarios, health
+<<<<<<< Updated upstream
+from app.api.v1 import institutions, exposures, network, simulations, scenarios, health, ml, ccp
+=======
+from app.api.v1 import institutions, exposures, network, simulations, scenarios, health, ml, ccp, abm_simulation, llm_chat
+>>>>>>> Stashed changes
 
 # Create main API router
 api_router = APIRouter()
@@ -41,3 +45,31 @@ api_router.include_router(
     prefix="/scenarios",
     tags=["Scenarios"]
 )
+
+# ML and CCP endpoints
+api_router.include_router(
+    ml.router,
+    tags=["Machine Learning"]
+)
+
+api_router.include_router(
+    ccp.router,
+    tags=["CCP Risk Analysis"]
+)
+
+<<<<<<< Updated upstream
+=======
+# Agent-Based Model endpoint
+api_router.include_router(
+    abm_simulation.router,
+    prefix="/abm",
+    tags=["Agent-Based Model"]
+)
+
+# LLM Chat endpoint for natural language explanations
+api_router.include_router(
+    llm_chat.router,
+    prefix="/llm",
+    tags=["LLM Chat"]
+)
+>>>>>>> Stashed changes

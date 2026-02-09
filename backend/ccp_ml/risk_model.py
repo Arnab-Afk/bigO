@@ -253,6 +253,63 @@ class CCPRiskModel:
         probs = self.predict_proba(X)[:, 1]
         return (probs >= self.conservative_threshold).astype(int)
     
+    def predict_all(self, features: pd.DataFrame) -> Dict[str, float]:
+        """
+        Predict default probabilities for all entities in the feature matrix.
+        
+        Args:
+            features: Full feature DataFrame including bank_name column
+            
+        Returns:
+            Dictionary mapping entity names to default probabilities
+        """
+        # Extract bank names first
+        if 'bank_name' not in features.columns:
+            logger.error("No bank_name column found in features")
+            return {}
+        
+        bank_names = features['bank_name'].values
+        
+        # Check if model is fitted
+        if not self.is_fitted:
+            # Fallback: use prior probabilities if available
+            if 'default_probability_prior' in features.columns:
+                logger.info("Using default_probability_prior as risk scores (model not fitted)")
+                probs = features['default_probability_prior'].fillna(0.3).values
+            else:
+                # If no prior available, return moderate risk (0.3) for all
+                logger.warning("Model not fitted and no prior probabilities available. Using default risk of 0.3")
+                probs = np.full(len(features), 0.3)
+        else:
+            # Model is fitted - make real predictions
+            # Select only numeric features (exclude bank_name, timestamp, etc.)
+            X, _ = select_features(features)
+            
+            # Ensure we only use features that were present during training
+            if self.feature_names is not None:
+                # Get intersection of current features and training features
+                available_features = [f for f in self.feature_names if f in X.columns]
+                missing_features = set(self.feature_names) - set(X.columns)
+                
+                if missing_features:
+                    logger.warning(f"Missing {len(missing_features)} features from training: {list(missing_features)[:5]}")
+                
+                # Select only available training features and add missing ones as zeros
+                X_aligned = pd.DataFrame(0, index=X.index, columns=self.feature_names)
+                X_aligned[available_features] = X[available_features]
+                X = X_aligned
+            
+            probs = self.predict_proba(X)[:, 1]  # Get P(default) for each sample
+            logger.info(f"Made ML predictions for {len(probs)} entities (using {len(self.feature_names)} features)")
+        
+        # Map bank names to probabilities
+        result = {}
+        for bank_name, prob in zip(bank_names, probs):
+            if pd.notna(bank_name):
+                result[str(bank_name)] = float(prob)
+        
+        return result
+    
     def evaluate(
         self,
         X: pd.DataFrame,

@@ -14,6 +14,14 @@ from uuid import UUID
 import numpy as np
 from scipy.optimize import minimize
 
+from app.engine.nash_solvers import (
+    LemkeHowsonSolver,
+    SupportEnumerationSolver,
+    CorrelatedEquilibriumSolver,
+    MixedStrategy,
+    MixedNashEquilibrium,
+)
+
 
 class ActionType(str, enum.Enum):
     """Types of actions agents can take"""
@@ -649,6 +657,334 @@ class NashEquilibriumSolver:
                     nash.append((ai, aj))
 
         return nash
+
+
+class MixedStrategyNashSolver:
+    """
+    Mixed Strategy Nash Equilibrium Solver
+
+    Extends pure Nash solver with mixed strategy computation.
+    Supports:
+    - 2-player games via Lemke-Howson
+    - N-player games via support enumeration
+    - Correlated equilibrium computation
+    """
+
+    def __init__(self, tolerance: float = 1e-6, max_support_size: int = 3):
+        """
+        Args:
+            tolerance: Convergence threshold
+            max_support_size: Maximum support size for enumeration
+        """
+        self.tolerance = tolerance
+        self.max_support_size = max_support_size
+        self.lemke_howson = LemkeHowsonSolver(tolerance=tolerance)
+        self.support_enumeration = SupportEnumerationSolver(tolerance=tolerance)
+        self.ce_solver = CorrelatedEquilibriumSolver(tolerance=tolerance)
+
+    def solve_mixed_nash_2player(
+        self,
+        agent_i_id: UUID,
+        agent_j_id: UUID,
+        payoff_matrix_i: np.ndarray,
+        payoff_matrix_j: np.ndarray,
+        action_names_i: List[str],
+        action_names_j: List[str],
+    ) -> MixedNashEquilibrium:
+        """
+        Solve for mixed strategy Nash equilibrium in 2-player game using Lemke-Howson
+
+        Args:
+            agent_i_id: First player ID
+            agent_j_id: Second player ID
+            payoff_matrix_i: Payoff matrix for player i (rows=i's actions, cols=j's actions)
+            payoff_matrix_j: Payoff matrix for player j
+            action_names_i: Names of player i's actions
+            action_names_j: Names of player j's actions
+
+        Returns:
+            Mixed Nash equilibrium with strategies for both players
+        """
+        # Filter dominated strategies first
+        reduced_i, remaining_i = self.support_enumeration.filter_dominated_strategies(
+            payoff_matrix_i
+        )
+        reduced_j, remaining_j = self.support_enumeration.filter_dominated_strategies(
+            payoff_matrix_j.T
+        )
+
+        # Reconstruct reduced matrices
+        reduced_payoff_i = payoff_matrix_i[np.ix_(remaining_i, remaining_j)]
+        reduced_payoff_j = payoff_matrix_j[np.ix_(remaining_i, remaining_j)]
+
+        # Solve using Lemke-Howson
+        strategy_i_reduced, strategy_j_reduced = self.lemke_howson.solve(
+            reduced_payoff_i, reduced_payoff_j
+        )
+
+        # Map back to full action space
+        strategy_i = np.zeros(len(action_names_i))
+        strategy_j = np.zeros(len(action_names_j))
+
+        for idx, action_idx in enumerate(remaining_i):
+            strategy_i[action_idx] = strategy_i_reduced[idx]
+        for idx, action_idx in enumerate(remaining_j):
+            strategy_j[action_idx] = strategy_j_reduced[idx]
+
+        # Identify supports
+        support_i = {action_names_i[i] for i in range(len(strategy_i)) if strategy_i[i] > self.tolerance}
+        support_j = {action_names_j[j] for j in range(len(strategy_j)) if strategy_j[j] > self.tolerance}
+
+        # Build mixed strategies
+        mixed_i = MixedStrategy(
+            agent_id=agent_i_id,
+            action_probabilities={
+                action_names_i[i]: strategy_i[i]
+                for i in range(len(strategy_i))
+                if strategy_i[i] > self.tolerance
+            },
+            support=support_i,
+            expected_payoff=float(strategy_i @ payoff_matrix_i @ strategy_j),
+        )
+
+        mixed_j = MixedStrategy(
+            agent_id=agent_j_id,
+            action_probabilities={
+                action_names_j[j]: strategy_j[j]
+                for j in range(len(strategy_j))
+                if strategy_j[j] > self.tolerance
+            },
+            support=support_j,
+            expected_payoff=float(strategy_i @ payoff_matrix_j @ strategy_j),
+        )
+
+        is_pure = len(support_i) == 1 and len(support_j) == 1
+
+        return MixedNashEquilibrium(
+            strategies={agent_i_id: mixed_i, agent_j_id: mixed_j},
+            is_pure=is_pure,
+            support_size=len(support_i) + len(support_j),
+            convergence_error=0.0,
+        )
+
+    def support_enumeration(
+        self,
+        agent_i_id: UUID,
+        agent_j_id: UUID,
+        payoff_matrix_i: np.ndarray,
+        payoff_matrix_j: np.ndarray,
+        action_names_i: List[str],
+        action_names_j: List[str],
+    ) -> List[MixedNashEquilibrium]:
+        """
+        Find all Nash equilibria using support enumeration
+
+        Args:
+            agent_i_id: First player ID
+            agent_j_id: Second player ID
+            payoff_matrix_i: Payoff matrix for player i
+            payoff_matrix_j: Payoff matrix for player j
+            action_names_i: Names of player i's actions
+            action_names_j: Names of player j's actions
+
+        Returns:
+            List of all found Nash equilibria
+        """
+        equilibria = []
+
+        # Generate all support pairs
+        supports = self.support_enumeration.enumerate_supports(
+            payoff_matrix_i.shape[0],
+            payoff_matrix_j.shape[1],
+            max_support_size=self.max_support_size,
+        )
+
+        for supp_i, supp_j in supports:
+            result = self.support_enumeration.solve_for_support(
+                payoff_matrix_i, payoff_matrix_j,
+                supp_i, supp_j
+            )
+
+            if result is not None:
+                strategy_i, strategy_j = result
+
+                # Build equilibrium
+                support_i_names = {action_names_i[i] for i in supp_i}
+                support_j_names = {action_names_j[j] for j in supp_j}
+
+                mixed_i = MixedStrategy(
+                    agent_id=agent_i_id,
+                    action_probabilities={
+                        action_names_i[i]: strategy_i[i]
+                        for i in range(len(strategy_i))
+                        if strategy_i[i] > self.tolerance
+                    },
+                    support=support_i_names,
+                    expected_payoff=float(strategy_i @ payoff_matrix_i @ strategy_j),
+                )
+
+                mixed_j = MixedStrategy(
+                    agent_id=agent_j_id,
+                    action_probabilities={
+                        action_names_j[j]: strategy_j[j]
+                        for j in range(len(strategy_j))
+                        if strategy_j[j] > self.tolerance
+                    },
+                    support=support_j_names,
+                    expected_payoff=float(strategy_i @ payoff_matrix_j @ strategy_j),
+                )
+
+                is_pure = len(support_i_names) == 1 and len(support_j_names) == 1
+
+                equilibria.append(MixedNashEquilibrium(
+                    strategies={agent_i_id: mixed_i, agent_j_id: mixed_j},
+                    is_pure=is_pure,
+                    support_size=len(support_i_names) + len(support_j_names),
+                ))
+
+        return equilibria
+
+    def compute_correlated_equilibrium(
+        self,
+        agent_i_id: UUID,
+        agent_j_id: UUID,
+        payoff_matrix_i: np.ndarray,
+        payoff_matrix_j: np.ndarray,
+        action_names_i: List[str],
+        action_names_j: List[str],
+        objective: str = "welfare",
+    ) -> Dict:
+        """
+        Compute correlated equilibrium using linear programming
+
+        Args:
+            agent_i_id: First player ID
+            agent_j_id: Second player ID
+            payoff_matrix_i: Payoff matrix for player i
+            payoff_matrix_j: Payoff matrix for player j
+            action_names_i: Names of player i's actions
+            action_names_j: Names of player j's actions
+            objective: Optimization objective
+
+        Returns:
+            Dictionary with joint distribution and expected payoffs
+        """
+        distribution = self.ce_solver.compute_correlated_equilibrium(
+            payoff_matrix_i, payoff_matrix_j, objective
+        )
+
+        # Compute marginals
+        marginal_i = distribution.sum(axis=1)
+        marginal_j = distribution.sum(axis=0)
+
+        # Expected payoffs
+        expected_payoff_i = float(np.sum(distribution * payoff_matrix_i))
+        expected_payoff_j = float(np.sum(distribution * payoff_matrix_j))
+
+        return {
+            "agent_i_id": str(agent_i_id),
+            "agent_j_id": str(agent_j_id),
+            "joint_distribution": {
+                f"{action_names_i[i]}|{action_names_j[j]}": float(distribution[i, j])
+                for i in range(len(action_names_i))
+                for j in range(len(action_names_j))
+                if distribution[i, j] > self.tolerance
+            },
+            "marginal_i": {
+                action_names_i[i]: float(marginal_i[i])
+                for i in range(len(action_names_i))
+                if marginal_i[i] > self.tolerance
+            },
+            "marginal_j": {
+                action_names_j[j]: float(marginal_j[j])
+                for j in range(len(action_names_j))
+                if marginal_j[j] > self.tolerance
+            },
+            "expected_payoff_i": expected_payoff_i,
+            "expected_payoff_j": expected_payoff_j,
+            "social_welfare": expected_payoff_i + expected_payoff_j,
+        }
+
+    def check_nash_equilibrium(
+        self,
+        agent_i_id: UUID,
+        agent_j_id: UUID,
+        payoff_matrix_i: np.ndarray,
+        payoff_matrix_j: np.ndarray,
+        strategy_i: Dict[str, float],
+        strategy_j: Dict[str, float],
+        action_names_i: List[str],
+        action_names_j: List[str],
+    ) -> Dict:
+        """
+        Check if given strategies form a Nash equilibrium
+
+        Args:
+            agent_i_id: First player ID
+            agent_j_id: Second player ID
+            payoff_matrix_i: Payoff matrix for player i
+            payoff_matrix_j: Payoff matrix for player j
+            strategy_i: Mixed strategy for player i (action_name -> probability)
+            strategy_j: Mixed strategy for player j
+            action_names_i: Names of player i's actions
+            action_names_j: Names of player j's actions
+
+        Returns:
+            Dictionary with verification results
+        """
+        # Convert strategies to arrays
+        strat_i = np.array([strategy_i.get(name, 0.0) for name in action_names_i])
+        strat_j = np.array([strategy_j.get(name, 0.0) for name in action_names_j])
+
+        # Normalize
+        if strat_i.sum() > 0:
+            strat_i /= strat_i.sum()
+        if strat_j.sum() > 0:
+            strat_j /= strat_j.sum()
+
+        # Expected payoffs
+        expected_i = float(strat_i @ payoff_matrix_i @ strat_j)
+        expected_j = float(strat_i @ payoff_matrix_j @ strat_j)
+
+        # Check for profitable deviations
+        deviations_i = []
+        for i, action in enumerate(action_names_i):
+            pure_i = np.zeros_like(strat_i)
+            pure_i[i] = 1.0
+            dev_payoff = float(pure_i @ payoff_matrix_i @ strat_j)
+            if dev_payoff > expected_i + self.tolerance:
+                deviations_i.append({
+                    "action": action,
+                    "payoff": dev_payoff,
+                    "gain": dev_payoff - expected_i,
+                })
+
+        deviations_j = []
+        for j, action in enumerate(action_names_j):
+            pure_j = np.zeros_like(strat_j)
+            pure_j[j] = 1.0
+            dev_payoff = float(strat_i @ payoff_matrix_j @ pure_j)
+            if dev_payoff > expected_j + self.tolerance:
+                deviations_j.append({
+                    "action": action,
+                    "payoff": dev_payoff,
+                    "gain": dev_payoff - expected_j,
+                })
+
+        is_equilibrium = len(deviations_i) == 0 and len(deviations_j) == 0
+
+        return {
+            "is_nash_equilibrium": is_equilibrium,
+            "expected_payoff_i": expected_i,
+            "expected_payoff_j": expected_j,
+            "profitable_deviations_i": deviations_i,
+            "profitable_deviations_j": deviations_j,
+            "epsilon_equilibrium": is_equilibrium or (
+                max(
+                    [0] + [d["gain"] for d in deviations_i] + [d["gain"] for d in deviations_j]
+                ) < self.tolerance * 10
+            ),
+        }
 
 
 def generate_action_space(

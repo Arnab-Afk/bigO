@@ -31,13 +31,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await init_db()
             logger.info("Database initialized")
     except Exception as e:
-        logger.error("Failed to initialize database", error=str(e))
+        logger.warning("Database initialization skipped - database not available", error=str(e))
+        logger.info("CCP API will function without database (standalone mode)")
     
     yield
     
     # Shutdown
     logger.info("Shutting down RUDRA API")
-    await close_db()
+    try:
+        await close_db()
+    except Exception as e:
+        logger.warning("Database cleanup skipped", error=str(e))
 
 
 # Create FastAPI application
