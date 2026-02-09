@@ -9,23 +9,23 @@ const inter = Inter({ subsets: ["latin"], variable: '--font-inter' });
 export const metadata: Metadata = {
   title: 'RUDRA - Resilient Unified Decision & Risk Analytics',
   description: 'Network-based game-theoretic modeling of financial infrastructure. Predict systemic risk, prevent cascading failures, and ensure financial stability.',
-  generator: 'v0.app',
+  generator: 'Arnab Bhowmik',
   icons: {
     icon: [
       {
-        url: '/icon-light-32x32.png',
+        url: '/images/hero-mono-overlay.png',
         media: '(prefers-color-scheme: light)',
       },
       {
-        url: '/icon-dark-32x32.png',
+        url: '/images/hero-mono-overlay.png',
         media: '(prefers-color-scheme: dark)',
       },
       {
-        url: '/icon.svg',
+        url: '/images/hero-mono-overlay.png',
         type: 'image/svg+xml',
       },
     ],
-    apple: '/apple-icon.png',
+    apple: '/images/hero-mono-overlay.png',
   },
 }
 

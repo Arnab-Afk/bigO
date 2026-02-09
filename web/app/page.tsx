@@ -15,7 +15,7 @@ export default function Home() {
       <Header />
       <HeroSection />
       <PhilosophySection />
-      <FeaturedProductsSection />
+      {/* <FeaturedProductsSection /> */}
       <TechnologySection />
       <GallerySection />
       <CollectionSection />
